@@ -201,9 +201,12 @@ declare namespace MarkinJS {
         dragstart: (event: DragEvent) => void;
         drag: (event: DragEvent) => void;
         dragend: (event: DragEndEvent) => void;
-        /** At most once per frame while the pointer moves over the canvas. */
+        /** At most once per frame while the pointer moves over the canvas. In a disabled editor `id` is always `null`. */
         hover: (event: HoverEvent) => void;
-        /** A click on the canvas that hit no annotation. */
+        /**
+         * A click on the canvas that hit no annotation, and was not a drag of the view. In a disabled
+         * editor that is every click.
+         */
         canvasclick: (event: CanvasClickEvent) => void;
         /** The view moved or the canvas changed size: at most once per frame. Also once for the first view. */
         viewchange: (view: View) => void;
@@ -251,7 +254,11 @@ declare namespace MarkinJS {
         clearHistory(): void;
 
         enable(): void;
-        /** Stop reacting to pointer and keyboard; pointer events pass through to what is underneath. */
+        /**
+         * Stop editing: nothing can be selected, moved or deleted, and pointer events pass through the
+         * annotations to what is underneath. The view can still be zoomed and moved, and `hover` and
+         * `canvasclick` are still emitted.
+         */
         disable(): void;
         isEnabled(): boolean;
         setOptions(options: Omit<Options, 'annotations'>): void;

@@ -816,7 +816,8 @@ const MarkinJS = (function () {
             const on = (target, type, method, options) => listen(target, type, (event) => this[method](event), options);
             this.cleanup = [
                 on(svg, 'pointerdown', '_onPointerDown'),
-                on(svg, 'pointermove', '_onHover'),
+                // On the viewport where there is one: it also hears the pointer over a disabled overlay.
+                on(this.viewport || svg, 'pointermove', '_onHover'),
                 on(svg, 'touchstart', '_onTouchStart', { passive: true }),
                 weakListen(this.doc, 'keydown', this, '_onKeyDown'),
                 weakListen(this.doc, 'keyup', this, '_onKeyUp'),
@@ -2022,7 +2023,9 @@ const MarkinJS = (function () {
             this._remeasure();
         }
 
-        // Stop reacting to pointer and keyboard. Pointer events pass through to whatever is below.
+        // Stop editing: nothing can be selected, moved or deleted, and pointer events pass through
+        // the annotations to whatever is below. The view can still be moved, and `hover` and
+        // `canvasclick` still say where the pointer is, so a host's own tool can work on the picture.
         disable() {
             if (this.dead || !this.enabled) return;
             this._settle();
@@ -2416,7 +2419,9 @@ const MarkinJS = (function () {
             if (this.pressed === event) return;
             this.pressed = event;
             this.inside = true;
-            if (!this.enabled) return;
+            // A disabled editor edits nothing, but its view still moves and a click is still reported.
+            const editing = this.enabled;
+            if (!editing && !this.viewport) return;
             claimKeyboard(this, true);
             if (event.isPrimary === false) return;
             // Space or the middle button: this drag moves the view, whatever it starts on.
@@ -2428,10 +2433,10 @@ const MarkinJS = (function () {
                 this._finishGesture(!this.gesture.live);
             }
             // Resolve the target first: the calls below may redraw the handles.
-            const hit = grab ? null : this._hit(event.target);
+            const hit = grab || !editing ? null : this._hit(event.target);
             this._flushNudge();
             this._remeasure();
-            if (!this.enabled) return; // a change listener may have run
+            if (editing && !this.enabled) return; // a change listener may have run
 
             const gesture = {
                 kind: grab ? 'pan' : 'canvas',
@@ -2740,7 +2745,7 @@ const MarkinJS = (function () {
             }
             if (g.kind === 'canvas') {
                 if (!g.moved && !cancelled) {
-                    this.deselect();
+                    if (this.enabled) this.deselect();
                     this._emit('canvasclick', { position: this._toLocal(g.clientX, g.clientY) });
                 }
                 return;
@@ -2756,7 +2761,7 @@ const MarkinJS = (function () {
         }
 
         _onHover(event) {
-            if (!this.enabled || this.gesture) return;
+            if (this.gesture || (!this.enabled && !this.viewport)) return;
             this.hoverEvent = { clientX: event.clientX, clientY: event.clientY, target: event.target };
             if (this.hoverFrame) return;
             this.hoverFrame = this._frame(() => {
@@ -2764,7 +2769,8 @@ const MarkinJS = (function () {
                 const last = this.hoverEvent;
                 this.hoverEvent = null;
                 if (!last) return;
-                const hit = this._hit(last.target);
+                // Nothing can be pointed at in a disabled editor; where the pointer is still counts.
+                const hit = this.enabled ? this._hit(last.target) : null;
                 const part = hit && hit.kind === 'part' ? hit : null;
                 this._remeasure();
                 if (!this._has('hover')) return;
@@ -2780,7 +2786,7 @@ const MarkinJS = (function () {
         // ---- keyboard
 
         _onKeyDown(event) {
-            if (!this.enabled || !this.opts.keyboardControls) return;
+            if (this.dead || !this.opts.keyboardControls) return;
             if (event.defaultPrevented || event.isComposing) return;
             if (typeof event.key !== 'string' || isTypingTarget(event)) return;
             if (this._onSpace(event, true)) return;
@@ -2789,6 +2795,8 @@ const MarkinJS = (function () {
                 event.preventDefault();
                 return;
             }
+            // The keys above move the view. The ones below edit, which a disabled editor does not.
+            if (!this.enabled) return;
 
             const mod = event.ctrlKey || event.metaKey;
             let key = event.key.length === 1 ? event.key.toLowerCase() : event.key;

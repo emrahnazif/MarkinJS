@@ -16,6 +16,7 @@ import {
     keyUp,
     bboxEl,
     handleEl,
+    nextFrame,
     BOX,
     SVG_NS
 } from './setup.js';
@@ -779,5 +780,171 @@ describe('stepping through the annotations', () => {
         release(x + 20, y);
         expect(selected(editor)).toBe('b');
         expect(editor.getAnnotation('b').segments[0]).toEqual([740, 500]);
+    });
+});
+
+describe('a disabled editor', () => {
+    const THING = { id: 'box', bbox: [700, 500, 200, 200] };
+    function disabled(options) {
+        const made = clocked({ annotations: [THING], ...options });
+        made.editor.disable();
+        made.heard = [];
+        for (const type of ['change', 'select', 'deselect', 'dragstart', 'drag', 'dragend']) {
+            made.editor.on(type, () => made.heard.push(type));
+        }
+        return made;
+    }
+
+    it('still zooms with the wheel, the pinch and the keys', () => {
+        const { editor, svg } = disabled();
+        expect(wheel(svg, 420, 320, { deltaY: -10, ctrlKey: true }).defaultPrevented).toBe(true);
+        expect(editor.getView().scale).toBeCloseTo(0.5 * Math.pow(2, 0.2), 5);
+        gesture('gesturestart', svg, 420, 320, 1);
+        gesture('gesturechange', svg, 420, 320, 2);
+        gesture('gestureend', svg, 420, 320, 2);
+        expect(editor.getView().scale).toBeCloseTo(Math.pow(2, 0.2), 5);
+        click(svg, 100, 100);
+        expect(key('!', { code: 'Digit1', shiftKey: true }).defaultPrevented).toBe(true);
+        expect(editor.getView()).toEqual(WHOLE);
+        expect(key('+').defaultPrevented).toBe(true);
+        later(1000);
+        wheel(svg, 420, 320, { deltaY: 30 });
+        expect(editor.getView().y).toBe(168);
+    });
+
+    it('can be dragged about from anywhere, since nothing in it takes the pointer', () => {
+        const { editor, svg, heard } = disabled();
+        editor.zoomBy(4);
+        const [x, y] = screenOf(svg, 800, 600);
+        const down = press(bboxEl(svg, 'box'), x, y);
+        expect(down.defaultPrevented).toBe(false);
+        move(x - 40, y - 20);
+        release(x - 40, y - 20);
+        expect(editor.getView()).toEqual({ x: 620, y: 460, width: 400, height: 300, scale: 2 });
+
+        pointer('pointermove', svg, 100, 100, { buttons: 0 });
+        expect(key(' ', { code: 'Space' }).defaultPrevented).toBe(true);
+        press(svg, 100, 100);
+        move(60, 80);
+        release(60, 80);
+        keyUp(' ');
+        expect(editor.getView()).toEqual({ x: 640, y: 470, width: 400, height: 300, scale: 2 });
+        expect(heard).toEqual([]);
+        expect(editor.getSelection()).toBe(null);
+        expect(editor.getAnnotation('box')).toEqual(THING);
+    });
+
+    it('edits nothing', () => {
+        const { editor, svg, heard } = disabled({ stepKeys: true });
+        const [x, y] = screenOf(svg, 800, 600);
+        click(bboxEl(svg, 'box'), x, y);
+        press(bboxEl(svg, 'box'), x, y);
+        move(x + 40, y);
+        release(x + 40, y);
+        for (const name of ['Delete', 'ArrowRight', 'n', 'p']) expect(key(name).defaultPrevented).toBe(false);
+        expect(key('z', { ctrlKey: true }).defaultPrevented).toBe(false);
+        expect(heard).toEqual([]);
+        expect(editor.getSelection()).toBe(null);
+        expect(editor.getAnnotations()).toEqual([THING]);
+        expect(svg.querySelector('.markin-layer').style.pointerEvents).toBe('none');
+    });
+
+    it('reports every click that is not a drag, with where it is in the image', () => {
+        const { editor, svg } = disabled();
+        const clicks = [];
+        editor.on('canvasclick', (e) => clicks.push(e.position));
+        // On an annotation: to a disabled editor that is canvas like any other.
+        const [x, y] = screenOf(svg, 800, 600);
+        click(bboxEl(svg, 'box'), x, y);
+        expect(clicks).toEqual([{ x: 800, y: 600 }]);
+
+        editor.zoomBy(4);
+        const [zx, zy] = screenOf(svg, 750, 650);
+        click(svg, zx, zy);
+        expect(clicks[1].x).toBeCloseTo(750, 6);
+        expect(clicks[1].y).toBeCloseTo(650, 6);
+        // A drag of the view is not a click.
+        press(svg, zx, zy);
+        move(zx - 40, zy);
+        release(zx - 40, zy);
+        expect(clicks.length).toBe(2);
+    });
+
+    it('reports where the pointer is, without saying what is under it', async () => {
+        const { editor, svg } = disabled();
+        const seen = [];
+        editor.on('hover', (e) => seen.push(e));
+        const [x, y] = screenOf(svg, 800, 600);
+        pointer('pointermove', bboxEl(svg, 'box'), x, y, { buttons: 0 });
+        await nextFrame();
+        expect(seen).toEqual([{ position: { x: 800, y: 600 }, id: null, part: null, index: null }]);
+    });
+
+    it('hears the pointer over the image itself, where its overlay lets everything through', async () => {
+        const image = document.createElement('img');
+        Object.defineProperty(image, 'naturalWidth', { get: () => 1600 });
+        Object.defineProperty(image, 'naturalHeight', { get: () => 1200 });
+        document.body.appendChild(image);
+        vi.spyOn(Date, 'now').mockImplementation(() => now);
+        const editor = track(MarkinJS.create(image, { silent: true, annotations: [THING] }));
+        setBox(editor.getSVGElement(), HALF.box);
+        editor.disable();
+        expect(editor.getSVGElement().style.pointerEvents).toBe('none');
+        const clicks = [];
+        const hovers = [];
+        editor.on('canvasclick', (e) => clicks.push(e.position));
+        editor.on('hover', (e) => hovers.push(e.position));
+
+        click(image, 420, 320);
+        pointer('pointermove', image, 220, 170, { buttons: 0 });
+        await nextFrame();
+        expect(clicks).toEqual([{ x: 800, y: 600 }]);
+        expect(hovers).toEqual([{ x: 400, y: 300 }]);
+
+        expect(wheel(image, 420, 320, { deltaY: -10, ctrlKey: true }).defaultPrevented).toBe(true);
+        expect(editor.getView().scale).toBeGreaterThan(0.5);
+        editor.zoomBy(8);
+        press(image, 420, 320);
+        const dragged = move(380, 320);
+        release(380, 320);
+        expect(dragged.defaultPrevented).toBe(true);
+        // The browser would drag the image away as a picture; that is stopped while a press is followed.
+        press(image, 420, 320);
+        const native = new Event('dragstart', { bubbles: true, cancelable: true });
+        image.dispatchEvent(native);
+        expect(native.defaultPrevented).toBe(true);
+        release(420, 320);
+    });
+
+    it('keeps a drag of the view going when it is disabled or enabled in the middle of it', () => {
+        const { editor, svg } = clocked({ annotations: [THING] });
+        editor.zoomBy(4);
+        press(svg, 100, 100);
+        move(60, 80);
+        editor.disable();
+        move(20, 60);
+        editor.enable();
+        move(0, 0);
+        release(0, 0);
+        expect(editor.getView()).toEqual({ x: 650, y: 500, width: 400, height: 300, scale: 2 });
+    });
+
+    it('without a viewport it ignores the pointer altogether, as it always did', () => {
+        const real = window.getComputedStyle;
+        try {
+            const svg = document.createElementNS(SVG_NS, 'svg');
+            svg.setAttribute('viewBox', '0 0 800 600');
+            document.body.appendChild(svg);
+            setBox(svg, { left: 0, top: 0, width: 800, height: 600 });
+            window.getComputedStyle = (el) => (el === svg ? { position: 'absolute' } : real(el));
+            const editor = track(MarkinJS.create(svg, { silent: true, annotations: [BOX] }));
+            editor.disable();
+            const clicks = [];
+            editor.on('canvasclick', (e) => clicks.push(e));
+            click(svg, 500, 500);
+            expect(clicks).toEqual([]);
+        } finally {
+            window.getComputedStyle = real;
+        }
     });
 });
