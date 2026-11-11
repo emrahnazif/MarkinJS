@@ -246,6 +246,18 @@ const MarkinJS = (function () {
         return stop;
     }
 
+    // How an <svg> fits its viewBox into its box: where the spare room goes (0, 0.5 or 1 on each
+    // axis) and whether it fills the box instead (`slice`). Null for "none", which stretches.
+    function aspectOf(svg) {
+        const text = (svg.getAttribute('preserveAspectRatio') || '').trim();
+        if (/^none(\s|$)/.test(text)) return null;
+        const match = /^x(Min|Mid|Max)Y(Min|Mid|Max)(?:\s+(meet|slice))?$/.exec(text);
+        const at = { Min: 0, Mid: 0.5, Max: 1 };
+        return match
+            ? { x: at[match[1]], y: at[match[2]], slice: match[3] === 'slice' }
+            : { x: 0.5, y: 0.5, slice: false };
+    }
+
     // True for an element the user types into.
     function isTypingElement(target) {
         if (!target || typeof target.closest !== 'function') return false;
@@ -790,13 +802,82 @@ const MarkinJS = (function () {
         }
 
         // Matrix from SVG user space to client pixels, or null while the SVG is not laid out.
+        //
+        // It is worked out from the box the SVG occupies on screen. getScreenCTM() cannot be relied
+        // on for that: WebKit leaves the scale of a CSS-transformed ancestor out of it, and a scaled
+        // ancestor is how this editor zooms. Only a rotated or skewed canvas is more than a box can
+        // tell, and there the browser's own matrix is used as it is.
         _matrix() {
+            let m = null;
             try {
-                const m = this.svg.getScreenCTM();
-                return m && isNum(m.a) && m.a * m.d - m.b * m.c !== 0 ? m : null;
+                m = this.svg.getScreenCTM();
             } catch {
-                return null;
+                // Not rendered.
             }
+            if (m && !(isNum(m.a) && m.a * m.d - m.b * m.c !== 0)) m = null;
+            const turned = !!m && (Math.abs(m.b) > 1e-6 || Math.abs(m.c) > 1e-6);
+            if (turned || this.svg.ownerSVGElement) return m;
+            return this._boxMatrix() || m;
+        }
+
+        // The same matrix for an upright canvas, from getBoundingClientRect(), which every browser
+        // reports with all transforms applied.
+        _boxMatrix() {
+            const svg = this.svg;
+            const rect = svg.getBoundingClientRect();
+            if (!(rect.width > 0 && rect.height > 0)) return null;
+            // Border and padding of the <svg> itself are not part of its drawing area. They are
+            // layout pixels, and so is its size as CSS sees it; a scaled ancestor makes each of
+            // those `kx` by `ky` pixels on screen.
+            let style = null;
+            try {
+                style = this.win.getComputedStyle(svg);
+            } catch {
+                // An element that is not rendered has no style to read.
+            }
+            const px = (name) => (style && parseFloat(style[name])) || 0;
+            const left = px('borderLeftWidth') + px('paddingLeft');
+            const top = px('borderTopWidth') + px('paddingTop');
+            const right = px('borderRightWidth') + px('paddingRight');
+            const bottom = px('borderBottomWidth') + px('paddingBottom');
+            const borderBox = !!style && style.boxSizing === 'border-box';
+            const layoutW = px('width') + (borderBox ? 0 : left + right);
+            const layoutH = px('height') + (borderBox ? 0 : top + bottom);
+            const kx = layoutW > 0 ? rect.width / layoutW : 1;
+            const ky = layoutH > 0 ? rect.height / layoutH : 1;
+            // The drawing area in layout pixels.
+            const w = rect.width / kx - left - right;
+            const h = rect.height / ky - top - bottom;
+            if (!(w > 0 && h > 0)) return null;
+
+            // How the viewBox is fitted into that area, as preserveAspectRatio asks.
+            const vb = this._viewBox();
+            let sx = 1;
+            let sy = 1;
+            let ox = 0;
+            let oy = 0;
+            if (vb) {
+                sx = w / vb.w;
+                sy = h / vb.h;
+                const fit = aspectOf(svg);
+                if (fit) {
+                    const s = fit.slice ? Math.max(sx, sy) : Math.min(sx, sy);
+                    ox = (w - vb.w * s) * fit.x;
+                    oy = (h - vb.h * s) * fit.y;
+                    sx = s;
+                    sy = s;
+                }
+                ox -= vb.x * sx;
+                oy -= vb.y * sy;
+            }
+            return {
+                a: sx * kx,
+                b: 0,
+                c: 0,
+                d: sy * ky,
+                e: rect.left + (left + ox) * kx,
+                f: rect.top + (top + oy) * ky
+            };
         }
 
         _toLocal(clientX, clientY) {

@@ -678,6 +678,71 @@ describe('scale: image pixels are not screen pixels', () => {
         expect(num(svg.querySelector('.markin-layer'), 'stroke-width')).toBe(1);
     });
 
+    // What the editor does with a click, as a way to ask where it thinks a screen point is.
+    const whereIs = (editor, svg, x, y) => {
+        const clicks = [];
+        const stop = editor.on('canvasclick', (e) => clicks.push(e.position));
+        click(svg, x, y);
+        stop();
+        return clicks[0];
+    };
+
+    it('reads a scaled ancestor from the box, where the browser matrix leaves it out (WebKit)', () => {
+        const { editor, svg } = makeEditor({ annotations: [big] }, half);
+        editor.select('big');
+        // An ancestor is scaled 2x with CSS. The box on screen doubles; WebKit's getScreenCTM()
+        // moves the origin but keeps the scale it had.
+        setBox(svg, { left: 20, top: 20, width: 1600, height: 1200 });
+        svg.getScreenCTM = () => ({ a: 0.5, b: 0, c: 0, d: 0.5, e: 20, f: 20 });
+        editor.refresh();
+        expect(num(svg.querySelector('.markin-handle'), 'r')).toBe(5);
+        expect(whereIs(editor, svg, 1020, 820)).toEqual({ x: 1000, y: 800 });
+
+        editor.select('big');
+        drag(bboxEl(svg, 'big'), [300, 300], [350, 320]);
+        expect(editor.getAnnotation('big').bbox).toEqual([250, 220, 400, 200]);
+    });
+
+    it('leaves a rotated canvas to the browser matrix', () => {
+        const { editor, svg } = makeEditor();
+        // A quarter turn: image (x, y) is drawn at screen (100 - y, x).
+        svg.getScreenCTM = () => ({ a: 0, b: 1, c: -1, d: 0, e: 100, f: 0 });
+        expect(whereIs(editor, svg, 60, 30)).toEqual({ x: 30, y: 40 });
+    });
+
+    it('follows preserveAspectRatio when the box and the image have different proportions', () => {
+        const wide = { viewBox: '0 0 800 600', box: { left: 0, top: 0, width: 1000, height: 600 } };
+        const at = (ratio, x, y) => {
+            const { editor, svg } = makeEditor({}, wide);
+            if (ratio) svg.setAttribute('preserveAspectRatio', ratio);
+            return whereIs(editor, svg, x, y);
+        };
+        expect(at(null, 150, 100)).toEqual({ x: 50, y: 100 }); // centred: 100px spare on each side
+        expect(at('xMinYMin meet', 150, 100)).toEqual({ x: 150, y: 100 });
+        expect(at('xMaxYMid', 250, 100)).toEqual({ x: 50, y: 100 });
+        expect(at('none', 500, 300)).toEqual({ x: 400, y: 300 });
+        // slice fills the box: 1.25x, and 75px of the height is cut off at the top and the bottom.
+        expect(at('xMidYMid slice', 500, 0)).toEqual({ x: 400, y: 60 });
+    });
+
+    it('does not count the border and padding of the <svg> as part of the image', () => {
+        const real = window.getComputedStyle;
+        try {
+            const { editor, svg } = makeEditor({}, { box: { left: 0, top: 0, width: 830, height: 630 } });
+            const frame = { borderLeftWidth: '10px', paddingLeft: '5px', borderTopWidth: '10px', paddingTop: '5px' };
+            const others = { borderRightWidth: '10px', paddingRight: '5px', borderBottomWidth: '10px' };
+            const style = { ...frame, ...others, paddingBottom: '5px', width: '800px', height: '600px' };
+            window.getComputedStyle = (el) => (el === svg ? style : real(el));
+            expect(whereIs(editor, svg, 115, 215)).toEqual({ x: 100, y: 200 });
+
+            // The same canvas inside an ancestor scaled 2x: the frame doubles with everything else.
+            setBox(svg, { left: 0, top: 0, width: 1660, height: 1260 });
+            expect(whereIs(editor, svg, 230, 430)).toEqual({ x: 100, y: 200 });
+        } finally {
+            window.getComputedStyle = real;
+        }
+    });
+
     it('works before the SVG has a size, using its coordinates as they are', () => {
         const { editor, svg } = makeEditor({ annotations: [BOX] }, { viewBox: '0 0 800 600', box: null });
         editor.select('A');
