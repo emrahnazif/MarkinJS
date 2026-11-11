@@ -1143,14 +1143,13 @@ const MarkinJS = (function () {
             };
         }
 
-        _toLocal(clientX, clientY) {
-            const m = this._matrix();
+        // A point on screen as a point of the image. `m` is the matrix, when the caller has it already.
+        _toLocal(clientX, clientY, m = this._matrix()) {
             return m ? unmap(m, clientX, clientY) : { x: clientX, y: clientY };
         }
 
         // Re-read how many SVG units one screen pixel covers. True when it changed noticeably.
-        _measure() {
-            const m = this._matrix();
+        _measure(m = this._matrix()) {
             if (!m) return false;
             const scale = scaleOf(m);
             if (!(scale > 0) || !Number.isFinite(scale)) return false;
@@ -1161,8 +1160,8 @@ const MarkinJS = (function () {
         }
 
         // Handles and outlines take the size the canvas now has on screen.
-        _remeasure() {
-            if (!this.dead && this._measure()) this._rescale();
+        _remeasure(m) {
+            if (!this.dead && this._measure(m)) this._rescale();
         }
 
         _onResize() {
@@ -1173,8 +1172,8 @@ const MarkinJS = (function () {
         // The canvas changed size or place on the page: measure it again.
         refresh() {
             if (this.dead) return;
-            this._remeasure();
             const g = this._geometry();
+            this._remeasure(g ? g.m : undefined);
             if (!g) return;
             // A view that is zoomed in keeps showing the same part of the picture ...
             const v = this.view;
@@ -1270,8 +1269,8 @@ const MarkinJS = (function () {
             if (next.scale === v.scale && next.x === v.x && next.y === v.y) return false;
             this.view = next;
             this._writeView();
-            // Handles and outlines follow in the same frame.
-            this._remeasure();
+            // Handles and outlines follow a zoom in the same frame. Moving the view changes no size.
+            if (next.scale !== v.scale) this._remeasure();
             this._viewChanged();
             return true;
         }
@@ -2506,7 +2505,8 @@ const MarkinJS = (function () {
             // Resolve the target first: the calls below may redraw the handles.
             const hit = grab ? null : this._hit(event.target);
             this._flushNudge();
-            this._remeasure();
+            const m = this._matrix();
+            this._remeasure(m);
             if (editing && !this.enabled) return; // a change listener may have run
 
             const gesture = {
@@ -2531,7 +2531,7 @@ const MarkinJS = (function () {
                 event.preventDefault();
                 event.stopPropagation();
                 this._takeFocus();
-                const target = this._pressTarget(hit, this._toLocal(event.clientX, event.clientY));
+                const target = this._pressTarget(hit, this._toLocal(event.clientX, event.clientY, m));
                 if (!target) return;
                 Object.assign(gesture, target);
                 this._capture(gesture, this.svg);
@@ -2838,10 +2838,11 @@ const MarkinJS = (function () {
                 if (!last) return;
                 const hit = this._hit(last.target);
                 const part = hit && hit.kind === 'part' ? hit : null;
-                this._remeasure();
+                const m = this._matrix();
+                this._remeasure(m);
                 if (!this._has('hover')) return;
                 this._emit('hover', {
-                    position: this._toLocal(last.clientX, last.clientY),
+                    position: this._toLocal(last.clientX, last.clientY, m),
                     id: part ? this.byId.get(part.key).id : null,
                     part: part ? part.part : null,
                     index: part ? part.index : null
