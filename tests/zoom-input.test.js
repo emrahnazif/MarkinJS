@@ -2,8 +2,10 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
     MarkinJS,
     makeEditor,
+    makeImage,
     track,
     setBox,
+    stageOf,
     screenOf,
     wheel,
     gesture,
@@ -16,14 +18,16 @@ import {
     keyUp,
     bboxEl,
     handleEl,
+    wait,
     nextFrame,
     BOX,
-    SVG_NS
+    HALF,
+    WHOLE,
+    LAID_OVER
 } from './setup.js';
 
-// A 1600 x 1200 image shown at 800 x 600, 20px from the top-left of the page.
-const HALF = { viewBox: '0 0 1600 1200', box: { left: 20, top: 20, width: 800, height: 600 } };
-const WHOLE = { x: 0, y: 0, width: 1600, height: 1200, scale: 0.5 };
+// A box in the middle of the image.
+const THING = { id: 'box', bbox: [700, 500, 200, 200] };
 
 // A clock the test moves by hand: the library tells one wheel movement from the next by the time between events.
 let now = 1000;
@@ -96,7 +100,7 @@ describe('pinch and Ctrl / Cmd + wheel', () => {
     });
 
     it('keep a shape that is being dragged under the pointer', () => {
-        const { editor, svg } = clocked({ annotations: [{ id: 'box', bbox: [700, 500, 200, 200] }] });
+        const { editor, svg } = clocked({ annotations: [THING] });
         editor.select('box');
         const [x, y] = screenOf(svg, 800, 600);
         press(bboxEl(svg, 'box'), x, y);
@@ -261,34 +265,17 @@ describe('zoomControls: false', () => {
     });
 
     it('also keeps quiet about an <svg> that could not be given a viewport', () => {
-        const real = window.getComputedStyle;
-        try {
-            const make = (options) => {
-                const svg = document.createElementNS(SVG_NS, 'svg');
-                document.body.appendChild(svg);
-                setBox(svg, HALF.box);
-                window.getComputedStyle = (el) => (el === svg ? { position: 'absolute' } : real(el));
-                const log = [];
-                const editor = track(
-                    MarkinJS.create(svg, { logger: (level, message) => log.push(message), ...options })
-                );
-                return { editor, svg, log };
-            };
-            expect(make({ zoomControls: false }).log).toEqual([]);
-            const loud = make({});
-            expect(loud.log.length).toBe(1);
-            // Nothing to zoom: the wheel is the page's.
-            expect(wheel(loud.svg, 420, 320, { deltaY: -10, ctrlKey: true }).defaultPrevented).toBe(false);
-        } finally {
-            window.getComputedStyle = real;
-        }
+        expect(clocked({ zoomControls: false }, LAID_OVER).log).toEqual([]);
+        const loud = clocked({}, LAID_OVER);
+        expect(loud.log.length).toBe(1);
+        // Nothing to zoom: the wheel is the page's.
+        expect(wheel(loud.svg, 420, 320, { deltaY: -10, ctrlKey: true }).defaultPrevented).toBe(false);
     });
 });
 
 describe('dragging the view', () => {
     const ZOOMED = { x: 600, y: 450, width: 400, height: 300, scale: 2 };
-    // A box in the middle of the image, and the editor zoomed in 4x on it.
-    const THING = { id: 'box', bbox: [700, 500, 200, 200] };
+    // The editor zoomed in 4x on the box.
     function zoomed(options) {
         const made = clocked({ annotations: [THING], settleDelay: 30, ...options });
         made.editor.zoomBy(4);
@@ -337,11 +324,11 @@ describe('dragging the view', () => {
             const { editor, svg } = zoomed();
             press(svg, 100, 100);
             move(5000, 5000);
-            expect(viewport(editor).firstChild.style.transform).toBe('translate(12px, 12px) scale(4)');
+            expect(stageOf(editor).style.transform).toBe('translate(12px, 12px) scale(4)');
             expect(editor.getView()).toEqual({ x: 0, y: 0, width: 394, height: 294, scale: 2 });
             // Coming back, the view follows at once.
             move(4990, 4990);
-            expect(viewport(editor).firstChild.style.transform).toBe('translate(2px, 2px) scale(4)');
+            expect(stageOf(editor).style.transform).toBe('translate(2px, 2px) scale(4)');
             release(4990, 4990);
         });
 
@@ -498,7 +485,6 @@ describe('dragging the view', () => {
     });
 
     it('does not let the view settle while it is held', async () => {
-        const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
         vi.restoreAllMocks();
         const { editor, svg } = zoomed();
         await wait(80);
@@ -531,7 +517,7 @@ describe('dragging the view', () => {
         press(svg, 100, 100);
         move(60, 80);
         release(60, 80);
-        await new Promise((resolve) => setTimeout(resolve, 5));
+        await wait(5);
         send();
         expect(clicks).toBe(2);
     });
@@ -785,7 +771,6 @@ describe('stepping through the annotations', () => {
 });
 
 describe('a disabled editor', () => {
-    const THING = { id: 'box', bbox: [700, 500, 200, 200] };
     function disabled(options) {
         const made = clocked({ annotations: [THING], ...options });
         made.editor.disable();
@@ -882,10 +867,7 @@ describe('a disabled editor', () => {
     });
 
     it('hears the pointer over the image itself, where its overlay lets everything through', async () => {
-        const image = document.createElement('img');
-        Object.defineProperty(image, 'naturalWidth', { get: () => 1600 });
-        Object.defineProperty(image, 'naturalHeight', { get: () => 1200 });
-        document.body.appendChild(image);
+        const { image } = makeImage({ width: 1600, height: 1200 });
         vi.spyOn(Date, 'now').mockImplementation(() => now);
         const editor = track(MarkinJS.create(image, { silent: true, annotations: [THING] }));
         setBox(editor.getSVGElement(), HALF.box);
@@ -931,21 +913,11 @@ describe('a disabled editor', () => {
     });
 
     it('without a viewport it ignores the pointer altogether, as it always did', () => {
-        const real = window.getComputedStyle;
-        try {
-            const svg = document.createElementNS(SVG_NS, 'svg');
-            svg.setAttribute('viewBox', '0 0 800 600');
-            document.body.appendChild(svg);
-            setBox(svg, { left: 0, top: 0, width: 800, height: 600 });
-            window.getComputedStyle = (el) => (el === svg ? { position: 'absolute' } : real(el));
-            const editor = track(MarkinJS.create(svg, { silent: true, annotations: [BOX] }));
-            editor.disable();
-            const clicks = [];
-            editor.on('canvasclick', (e) => clicks.push(e));
-            click(svg, 500, 500);
-            expect(clicks).toEqual([]);
-        } finally {
-            window.getComputedStyle = real;
-        }
+        const { editor, svg } = clocked({ annotations: [BOX] }, LAID_OVER);
+        editor.disable();
+        const clicks = [];
+        editor.on('canvasclick', (e) => clicks.push(e));
+        click(svg, 500, 500);
+        expect(clicks).toEqual([]);
     });
 });
