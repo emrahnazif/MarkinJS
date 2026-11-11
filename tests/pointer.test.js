@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
     makeEditor,
     setBox,
+    setStyle,
     pointer,
     press,
     move,
@@ -17,7 +18,8 @@ import {
     num,
     nextFrame,
     BOX,
-    OTHER
+    OTHER,
+    HALF
 } from './setup.js';
 
 // x 100..300, y 100..200 in an 800 x 600 image
@@ -611,12 +613,10 @@ describe('drag events', () => {
 });
 
 describe('scale: image pixels are not screen pixels', () => {
-    // A 1600 x 1200 image shown at 800 x 600, 20px from the top-left of the page.
-    const half = { viewBox: '0 0 1600 1200', box: { left: 20, top: 20, width: 800, height: 600 } };
     const big = { id: 'big', bbox: [200, 200, 400, 200], keypoints: [{ point: [300, 300] }] };
 
     it('converts pointer positions to image coordinates', () => {
-        const { editor, svg } = makeEditor({ annotations: [big] }, half);
+        const { editor, svg } = makeEditor({ annotations: [big] }, HALF);
         const clicks = [];
         editor.on('canvasclick', (e) => clicks.push(e.position));
         click(svg, 520, 420);
@@ -628,7 +628,7 @@ describe('scale: image pixels are not screen pixels', () => {
     });
 
     it('draws handles, keypoints and strokes at a constant size on screen', () => {
-        const { editor, svg } = makeEditor({ annotations: [big] }, half);
+        const { editor, svg } = makeEditor({ annotations: [big] }, HALF);
         editor.select('big');
         const layer = svg.querySelector('.markin-layer');
         expect(num(layer, 'stroke-width')).toBe(4); // 2px on screen
@@ -646,7 +646,7 @@ describe('scale: image pixels are not screen pixels', () => {
 
     it('rescales what is sized on screen, whether it is selected or not', () => {
         const plain = { id: 'plain', bbox: [900, 700, 200, 200] };
-        const { editor, svg } = makeEditor({ annotations: [big, plain] }, half);
+        const { editor, svg } = makeEditor({ annotations: [big, plain] }, HALF);
         editor.select('plain');
         expect(num(keypointEl(svg, 'big', 0), 'r')).toBe(10);
         expect(bboxEl(svg, 'plain').getAttribute('stroke-dasharray')).toBe('10 10');
@@ -660,7 +660,7 @@ describe('scale: image pixels are not screen pixels', () => {
     });
 
     it('picks up a new scale on the next press without being told', () => {
-        const { editor, svg } = makeEditor({ annotations: [big] }, half);
+        const { editor, svg } = makeEditor({ annotations: [big] }, HALF);
         editor.select('big');
         setBox(svg, { left: 0, top: 0, width: 1600, height: 1200 });
         press(handleEl(svg, 'se'), 600, 400);
@@ -688,7 +688,7 @@ describe('scale: image pixels are not screen pixels', () => {
     };
 
     it('reads a scaled ancestor from the box, where the browser matrix leaves it out (WebKit)', () => {
-        const { editor, svg } = makeEditor({ annotations: [big] }, half);
+        const { editor, svg } = makeEditor({ annotations: [big] }, HALF);
         editor.select('big');
         // An ancestor is scaled 2x with CSS. The box on screen doubles; WebKit's getScreenCTM()
         // moves the origin but keeps the scale it had.
@@ -726,21 +726,15 @@ describe('scale: image pixels are not screen pixels', () => {
     });
 
     it('does not count the border and padding of the <svg> as part of the image', () => {
-        const real = window.getComputedStyle;
-        try {
-            const { editor, svg } = makeEditor({}, { box: { left: 0, top: 0, width: 830, height: 630 } });
-            const frame = { borderLeftWidth: '10px', paddingLeft: '5px', borderTopWidth: '10px', paddingTop: '5px' };
-            const others = { borderRightWidth: '10px', paddingRight: '5px', borderBottomWidth: '10px' };
-            const style = { ...frame, ...others, paddingBottom: '5px', width: '800px', height: '600px' };
-            window.getComputedStyle = (el) => (el === svg ? style : real(el));
-            expect(whereIs(editor, svg, 115, 215)).toEqual({ x: 100, y: 200 });
+        const { editor, svg } = makeEditor({}, { box: { left: 0, top: 0, width: 830, height: 630 } });
+        const frame = { borderLeftWidth: '10px', paddingLeft: '5px', borderTopWidth: '10px', paddingTop: '5px' };
+        const others = { borderRightWidth: '10px', paddingRight: '5px', borderBottomWidth: '10px' };
+        setStyle(svg, { ...frame, ...others, paddingBottom: '5px', width: '800px', height: '600px' });
+        expect(whereIs(editor, svg, 115, 215)).toEqual({ x: 100, y: 200 });
 
-            // The same canvas inside an ancestor scaled 2x: the frame doubles with everything else.
-            setBox(svg, { left: 0, top: 0, width: 1660, height: 1260 });
-            expect(whereIs(editor, svg, 230, 430)).toEqual({ x: 100, y: 200 });
-        } finally {
-            window.getComputedStyle = real;
-        }
+        // The same canvas inside an ancestor scaled 2x: the frame doubles with everything else.
+        setBox(svg, { left: 0, top: 0, width: 1660, height: 1260 });
+        expect(whereIs(editor, svg, 230, 430)).toEqual({ x: 100, y: 200 });
     });
 
     it('works before the SVG has a size, using its coordinates as they are', () => {
