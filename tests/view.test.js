@@ -580,6 +580,72 @@ describe('a stage the page marked', () => {
         editor.zoomBy(2);
         expect(editor.getView()).toEqual({ x: 150, y: 150, width: 500, height: 300, scale: 2 });
         expect(svg.getAttribute('viewBox')).toBe('150 150 500 300');
+
+        // Zoomed again from there, the picture goes by where it stood at rest, not by where the
+        // view before this one left it.
+        editor.zoomBy(2);
+        expect(image.style.transform).toBe('translate(-1200px, -900px) scale(4)');
+        expect(svg.getAttribute('viewBox')).toBe('275 225 250 150');
+    });
+
+    it('keeps a picture that still fits against the side the page put it on', () => {
+        const aligned = (left) =>
+            makeStage({
+                viewport: { left: 0, top: 0, width: 1000, height: 600 },
+                picture: { left, top: 0, width: 800, height: 600 }
+            });
+        // 880 wide in a viewport of 1000: on the left it stays on the left, on the right on the right.
+        const atLeft = aligned(0);
+        atLeft.editor.zoomBy(1.1);
+        expect(atLeft.image.style.transform).toBe('translate(0px, -30px) scale(1.1)');
+        expect(atLeft.editor.toClient(0, 300).x).toBeCloseTo(0, 6);
+
+        const atRight = aligned(200);
+        atRight.editor.zoomBy(1.1);
+        expect(atRight.image.style.transform).toBe('translate(-80px, -30px) scale(1.1)');
+        expect(atRight.editor.toClient(800, 300).x).toBeCloseTo(1000, 6);
+    });
+
+    it('covers a viewport that changed size, also when the view itself could not follow', () => {
+        const box = { left: 0, top: 0, width: 800, height: 600 };
+        const { editor, svg, viewport } = makeStage({ viewport: box, picture: box });
+        editor.zoomBy(2);
+        // Moved as far as it goes: the corner of the picture is a handle's width inside the viewport.
+        press(svg, 100, 100);
+        move(5000, 5000);
+        release(5000, 5000);
+        expect(svg.getAttribute('viewBox')).toBe('-6 -6 400 300');
+
+        // The page makes the viewport wider. The view is at its limit and stays as it is, but
+        // there is more of the image to draw now.
+        setBox(viewport, { ...box, width: 1000 });
+        editor.refresh();
+        expect(svg.style.width).toBe('1000px');
+        expect(svg.getAttribute('viewBox')).toBe('-6 -6 500 300');
+    });
+
+    it('counts a border of the viewport out of what it shows', () => {
+        // A 10px border around the 800 x 600 that the viewport shows.
+        const { editor, svg } = makeStage({
+            viewport: { left: 0, top: 0, width: 820, height: 620 },
+            picture: { left: 10, top: 10, width: 800, height: 600 },
+            prepare(viewport) {
+                const sizes = { clientLeft: 10, clientTop: 10, clientWidth: 800, clientHeight: 600 };
+                const all = { ...sizes, offsetWidth: 820, offsetHeight: 620 };
+                for (const [name, value] of Object.entries(all)) Object.defineProperty(viewport, name, { value });
+            }
+        });
+        editor.zoomBy(2);
+        expect(svg.getAttribute('viewBox')).toBe('200 150 400 300');
+        expect([svg.style.left, svg.style.top, svg.style.width, svg.style.height]).toEqual([
+            '0px',
+            '0px',
+            '800px',
+            '600px'
+        ]);
+        const middle = editor.toClient(400, 300);
+        expect(middle.x).toBeCloseTo(410, 6);
+        expect(middle.y).toBeCloseTo(310, 6);
     });
 
     it('gives the page its own styles and attributes back', () => {

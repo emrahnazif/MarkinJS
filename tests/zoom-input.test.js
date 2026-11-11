@@ -69,6 +69,16 @@ describe('pinch and Ctrl / Cmd + wheel', () => {
         }
     });
 
+    it('zoom towards the pointer also from a view that was zoomed in around another point', () => {
+        const { editor, svg } = clocked();
+        for (let i = 0; i < 4; i++) wheel(svg, 220, 170, { deltaY: -12, ctrlKey: true });
+        const under = editor.toImage(620, 420);
+        for (let i = 0; i < 4; i++) {
+            wheel(svg, 620, 420, { deltaY: -12, ctrlKey: true });
+            near(editor.toImage(620, 420), under.x, under.y);
+        }
+    });
+
     it('zoom by an amount that follows the fingers, and never leap', () => {
         const { editor, svg } = clocked();
         // A pinch reports small steps: 5 is a factor of 2^0.1.
@@ -309,6 +319,17 @@ describe('dragging the view', () => {
             expect(heard).toEqual([]);
         });
 
+        it('moves it by what the pointer travels on screen, also on a page that scales the editor', () => {
+            // Everything at half size: the <svg> is 1600 x 1200 to CSS and 800 x 600 on screen.
+            const { editor, svg } = clocked({}, { ...HALF, style: { width: '1600px', height: '1200px' } });
+            editor.zoomBy(4);
+            expect(editor.getView()).toEqual(ZOOMED);
+            press(svg, 100, 100);
+            move(60, 80);
+            release(60, 80);
+            expect(editor.getView()).toEqual({ x: 620, y: 460, width: 400, height: 300, scale: 2 });
+        });
+
         it('leaves a click a click', () => {
             const { editor, svg, heard } = zoomed();
             editor.select('box');
@@ -330,6 +351,17 @@ describe('dragging the view', () => {
             move(4990, 4990);
             expect(svg.getAttribute('viewBox')).toBe('-1 -1 400 300');
             release(4990, 4990);
+        });
+
+        it('gives less room past the edge when the picture is barely larger than the viewport', () => {
+            const { editor, svg } = clocked();
+            // 808 x 606 in a viewport of 800 x 600. Half of the 8 and of the 6 pixels that do not
+            // fit is how far an edge comes in, so the other one is never out of reach.
+            editor.zoomBy(1.01);
+            press(svg, 100, 100);
+            move(5000, 5000);
+            release(5000, 5000);
+            near(editor.toClient(0, 0), 24, 23);
         });
 
         it('does nothing while the whole image is in view', () => {
