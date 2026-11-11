@@ -130,13 +130,18 @@ const MarkinJS = (function () {
     const deselected = (sel) => ({ id: sel.id, part: sel.part, index: sel.index });
     const NO_LIMIT = Object.freeze({ x1: -Infinity, y1: -Infinity, x2: Infinity, y2: Infinity });
 
-    // Client pixels -> SVG user space, through the inverse of matrix `m`.
+    // SVG user space -> client pixels through matrix `m`, and back through its inverse.
+    function map(m, x, y) {
+        return { x: m.a * x + m.c * y + m.e, y: m.b * x + m.d * y + m.f };
+    }
     function unmap(m, clientX, clientY) {
         const det = m.a * m.d - m.b * m.c;
         const x = clientX - m.e;
         const y = clientY - m.f;
         return { x: (m.d * x - m.c * y) / det, y: (m.a * y - m.b * x) / det };
     }
+    // Screen pixels per SVG unit under matrix `m`.
+    const scaleOf = (m) => Math.sqrt(Math.abs(m.a * m.d - m.b * m.c));
 
     // Keep a view within its limits. `g` is the geometry it is measured in (see Editor._geometry).
     //
@@ -159,7 +164,7 @@ const MarkinJS = (function () {
                 return share * (size - length) - o - s * a;
             }
             const give = Math.min(slack, (length - size) / 2);
-            return clamp(t, size - give - o - s * b, give - o - s * a);
+            return clampDelta(t, o + s * a, o + s * b, give, size - give);
         };
         // Whole thousandths: what is written to the page and what is remembered are the same number.
         const round = (v, digits) => {
@@ -307,6 +312,40 @@ const MarkinJS = (function () {
             options
         );
         return stop;
+    }
+
+    // The computed style of an element, or null where there is none to read.
+    function styleOf(el) {
+        try {
+            return el.ownerDocument.defaultView.getComputedStyle(el);
+        } catch {
+            return null;
+        }
+    }
+
+    // A length from a computed style, in layout pixels. Computed lengths are in pixels; anything
+    // else means the element is not laid out, and counts as 0.
+    function cssPx(style, name) {
+        const text = style ? style[name] : '';
+        return (/px$/.test(text) && parseFloat(text)) || 0;
+    }
+
+    // The CSS box of an element from its computed style: border plus padding on each side, and
+    // the size of what is inside them. All 0 where it cannot be read.
+    function cssBox(style) {
+        const left = cssPx(style, 'borderLeftWidth') + cssPx(style, 'paddingLeft');
+        const top = cssPx(style, 'borderTopWidth') + cssPx(style, 'paddingTop');
+        const right = cssPx(style, 'borderRightWidth') + cssPx(style, 'paddingRight');
+        const bottom = cssPx(style, 'borderBottomWidth') + cssPx(style, 'paddingBottom');
+        const outer = !!style && style.boxSizing === 'border-box';
+        return {
+            left,
+            top,
+            right,
+            bottom,
+            width: cssPx(style, 'width') - (outer ? left + right : 0),
+            height: cssPx(style, 'height') - (outer ? top + bottom : 0)
+        };
     }
 
     // How an <svg> fits its viewBox into its box: where the spare room goes (0, 0.5 or 1 on each
@@ -553,12 +592,14 @@ const MarkinJS = (function () {
     }
 
     // Zoom and pan are one CSS transform on a "stage" that holds the picture and the SVG, inside a
-    // "viewport" that clips it. Build the two around `subject`, in its place.
-    function wrapInStage(subject, blockLevel) {
+    // "viewport" that clips it. Build the two around `subject`, in its place; `style` is the
+    // computed style of what the viewport stands in for on the page.
+    function wrapInStage(subject, style) {
         const doc = subject.ownerDocument;
+        const block = /^(block|flex|grid|table|list-item|flow-root)$/.test((style && style.display) || '');
         const viewport = doc.createElement('div');
         viewport.className = 'markin-container';
-        viewport.style.cssText = `position:relative;display:${blockLevel ? 'block' : 'inline-block'};line-height:0`;
+        viewport.style.cssText = `position:relative;display:${block ? 'block' : 'inline-block'};line-height:0`;
         const stage = doc.createElement('div');
         stage.className = 'markin-stage';
         // Nothing in the stage is text: a drag across it moves the view, it does not select.
@@ -568,8 +609,6 @@ const MarkinJS = (function () {
         stage.appendChild(subject);
         return { viewport, stage };
     }
-
-    const BLOCK_LEVEL = /^(block|flex|grid|table|list-item|flow-root)$/;
 
     // Wrap an <img> in a viewport and a stage, and lay an <svg> exactly over the drawn image.
     // The SVG's viewBox is the image's natural size, so annotations are in image pixels.
@@ -582,11 +621,9 @@ const MarkinJS = (function () {
         const parent = subject.parentNode;
         if (!parent) throw new TypeError('MarkinJS.create: the image must be in the document');
 
-        const styleOf = () => (win && typeof win.getComputedStyle === 'function' ? win.getComputedStyle(image) : null);
-        const px = (value) => parseFloat(value) || 0;
         const before = [image.offsetWidth, image.offsetHeight];
         const resized = () => image.offsetWidth !== before[0] || image.offsetHeight !== before[1];
-        const { viewport: container, stage } = wrapInStage(subject, BLOCK_LEVEL.test((styleOf() || {}).display || ''));
+        const { viewport: container, stage } = wrapInStage(subject, styleOf(image));
         // Wrapping must not change how the image is laid out; a percentage width is the usual casualty.
         if (resized()) {
             container.style.width = '100%';
@@ -618,21 +655,17 @@ const MarkinJS = (function () {
             if (loaded) svg.setAttribute('viewBox', `0 0 ${nw} ${nh}`);
             svg.style.visibility = loaded ? '' : 'hidden';
 
-            const style = styleOf();
+            const style = styleOf(image);
             // Until the drawn image can be measured, the overlay simply covers the container.
             let place = { left: '0', top: '0', width: '100%', height: '100%', clipPath: '' };
             if (loaded && style && image.clientWidth > 0 && image.clientHeight > 0) {
                 // The image's content box, in layout pixels: borders and padding are not part of the picture.
-                const left = px(style.borderLeftWidth) + px(style.paddingLeft);
-                const top = px(style.borderTopWidth) + px(style.paddingTop);
-                const right = px(style.borderRightWidth) + px(style.paddingRight);
-                const bottom = px(style.borderBottomWidth) + px(style.paddingBottom);
-                const border = style.boxSizing === 'border-box';
-                let cw = px(style.width) - (border ? left + right : 0);
-                let ch = px(style.height) - (border ? top + bottom : 0);
+                const { left, top, width, height } = cssBox(style);
+                let cw = width;
+                let ch = height;
                 if (!(cw > 0 && ch > 0)) {
-                    cw = image.clientWidth - px(style.paddingLeft) - px(style.paddingRight);
-                    ch = image.clientHeight - px(style.paddingTop) - px(style.paddingBottom);
+                    cw = image.clientWidth - cssPx(style, 'paddingLeft') - cssPx(style, 'paddingRight');
+                    ch = image.clientHeight - cssPx(style, 'paddingTop') - cssPx(style, 'paddingBottom');
                 }
                 if (cw > 0 && ch > 0) {
                     const drawn = drawnRect(nw, nh, cw, ch, style.objectFit, style.objectPosition);
@@ -691,13 +724,7 @@ const MarkinJS = (function () {
         }
         if (!svg.parentNode) return null;
 
-        const win = svg.ownerDocument.defaultView;
-        let style = null;
-        try {
-            style = win.getComputedStyle(svg);
-        } catch {
-            // Not rendered.
-        }
+        const style = styleOf(svg);
         const refuse = () => {
             note(
                 'zoom and pan are off: wrapping the <svg> would change its layout. Mark the element that holds it with data-markin-stage instead (see the README).'
@@ -713,7 +740,7 @@ const MarkinJS = (function () {
             const now = box();
             return ['left', 'top', 'width', 'height'].some((side) => Math.abs(now[side] - before[side]) > 0.5);
         };
-        const { viewport, stage } = wrapInStage(svg, BLOCK_LEVEL.test((style && style.display) || ''));
+        const { viewport, stage } = wrapInStage(svg, style);
         // A percentage size has to find the same box to refer to.
         if (moved()) viewport.style.width = '100%';
         if (moved()) {
@@ -1015,26 +1042,13 @@ const MarkinJS = (function () {
             // Border and padding of the <svg> itself are not part of its drawing area. They are
             // layout pixels, and so is its size as CSS sees it; a scaled ancestor makes each of
             // those `kx` by `ky` pixels on screen.
-            let style = null;
-            try {
-                style = this.win.getComputedStyle(svg);
-            } catch {
-                // An element that is not rendered has no style to read.
-            }
-            // A computed length is in pixels; anything else means the element is not laid out.
-            const px = (name) => (style && /px$/.test(style[name]) && parseFloat(style[name])) || 0;
-            const left = px('borderLeftWidth') + px('paddingLeft');
-            const top = px('borderTopWidth') + px('paddingTop');
-            const right = px('borderRightWidth') + px('paddingRight');
-            const bottom = px('borderBottomWidth') + px('paddingBottom');
-            const borderBox = !!style && style.boxSizing === 'border-box';
-            const layoutW = px('width') + (borderBox ? 0 : left + right);
-            const layoutH = px('height') + (borderBox ? 0 : top + bottom);
-            const kx = layoutW > 0 ? rect.width / layoutW : 1;
-            const ky = layoutH > 0 ? rect.height / layoutH : 1;
+            const box = cssBox(styleOf(svg));
+            const sized = box.width > 0 && box.height > 0;
+            const kx = sized ? rect.width / (box.width + box.left + box.right) : 1;
+            const ky = sized ? rect.height / (box.height + box.top + box.bottom) : 1;
             // The drawing area in layout pixels.
-            const w = rect.width / kx - left - right;
-            const h = rect.height / ky - top - bottom;
+            const w = rect.width / kx - box.left - box.right;
+            const h = rect.height / ky - box.top - box.bottom;
             if (!(w > 0 && h > 0)) return null;
 
             // How the viewBox is fitted into that area, as preserveAspectRatio asks.
@@ -1062,12 +1076,10 @@ const MarkinJS = (function () {
                 b: 0,
                 c: 0,
                 d: sy * ky,
-                e: rect.left + (left + ox) * kx,
-                f: rect.top + (top + oy) * ky,
-                // Screen pixels per layout pixel, when the size CSS gives the <svg> could be read.
-                kx,
-                ky,
-                sized: layoutW > 0 && layoutH > 0
+                e: rect.left + (box.left + ox) * kx,
+                f: rect.top + (box.top + oy) * ky,
+                // Screen pixels per layout pixel, where the size CSS gives the <svg> could be read.
+                ...(sized ? { kx, ky } : null)
             };
         }
 
@@ -1080,7 +1092,7 @@ const MarkinJS = (function () {
         _measure() {
             const m = this._matrix();
             if (!m) return false;
-            const scale = Math.sqrt(Math.abs(m.a * m.d - m.b * m.c));
+            const scale = scaleOf(m);
             if (!(scale > 0) || !Number.isFinite(scale)) return false;
             const unit = 1 / scale;
             if (Math.abs(unit - this.unit) <= this.unit * 0.005) return false;
@@ -1142,8 +1154,8 @@ const MarkinJS = (function () {
             // The <svg> knows exactly; it is inside the stage, so its own figure includes the view.
             // The viewport's size is the fallback, and that is rounded to whole pixels.
             const v = this.view;
-            const kx = m.sized ? m.kx / v.scale : vp.offsetWidth > 0 ? box.width / vp.offsetWidth : 1;
-            const ky = m.sized ? m.ky / v.scale : vp.offsetHeight > 0 ? box.height / vp.offsetHeight : 1;
+            const kx = m.kx ? m.kx / v.scale : vp.offsetWidth > 0 ? box.width / vp.offsetWidth : 1;
+            const ky = m.ky ? m.ky / v.scale : vp.offsetHeight > 0 ? box.height / vp.offsetHeight : 1;
             // What is shown is the inside of the viewport's border.
             const left = box.left + (vp.clientLeft || 0) * kx;
             const top = box.top + (vp.clientTop || 0) * ky;
@@ -1153,23 +1165,9 @@ const MarkinJS = (function () {
             const stage = this.stage.getBoundingClientRect();
             const ox = (stage.left - left) / kx - v.x;
             const oy = (stage.top - top) / ky - v.y;
-            // ... and the picture, in the stage's own pixels, which no view changes.
-            const own = this.svg.getBoundingClientRect();
-            const image = vb || { x: 0, y: 0, w: own.width / Math.abs(m.a), h: own.height / Math.abs(m.d) };
-            const xs = [];
-            const ys = [];
-            for (const [px, py] of [
-                [image.x, image.y],
-                [image.x + image.w, image.y],
-                [image.x, image.y + image.h],
-                [image.x + image.w, image.y + image.h]
-            ]) {
-                xs.push(((m.a * px + m.c * py + m.e - left) / kx - ox - v.x) / v.scale);
-                ys.push(((m.b * px + m.d * py + m.f - top) / ky - oy - v.y) / v.scale);
-            }
-            // Screen pixels per image pixel, now and with the view at rest.
-            const scale = Math.sqrt(Math.abs(m.a * m.d - m.b * m.c));
-            return {
+            // Screen pixels per image pixel, as shown now.
+            const scale = scaleOf(m);
+            const g = {
                 m,
                 kx,
                 ky,
@@ -1179,27 +1177,34 @@ const MarkinJS = (function () {
                 height,
                 ox,
                 oy,
-                x1: Math.min(...xs),
-                x2: Math.max(...xs),
-                y1: Math.min(...ys),
-                y2: Math.max(...ys),
-                image,
                 scale,
                 // Zoomed out, the limit is the picture as the page lays it out, however large that is.
                 maxScale: Math.max(1, (this.opts.maxScale * v.scale) / scale),
                 stageWidth: stage.width / (kx * v.scale),
                 stageHeight: stage.height / (ky * v.scale)
             };
+            // ... and the picture, in the stage's own pixels, which no view changes. An <svg> without
+            // a viewBox is its own picture.
+            const own = vb ? null : this.svg.getBoundingClientRect();
+            g.image = vb || { x: 0, y: 0, w: own.width / Math.abs(m.a), h: own.height / Math.abs(m.d) };
+            const b = corners([g.image.x, g.image.y, g.image.w, g.image.h]);
+            const at = (x, y) => Object.values(this._onStage(g, x, y));
+            return Object.assign(g, extent([at(b.x1, b.y1), at(b.x2, b.y1), at(b.x1, b.y2), at(b.x2, b.y2)]));
         }
 
         // An image point in the stage's own pixels.
         _onStage(g, x, y) {
             const v = this.view;
-            const m = g.m;
+            const c = map(g.m, x, y);
             return {
-                x: ((m.a * x + m.c * y + m.e - g.left) / g.kx - g.ox - v.x) / v.scale,
-                y: ((m.b * x + m.d * y + m.f - g.top) / g.ky - g.oy - v.y) / v.scale
+                x: ((c.x - g.left) / g.kx - g.ox - v.x) / v.scale,
+                y: ((c.y - g.top) / g.ky - g.oy - v.y) / v.scale
             };
+        }
+
+        // The image points at the top left and the bottom right of the viewport.
+        _shown(g) {
+            return [unmap(g.m, g.left, g.top), unmap(g.m, g.left + g.width * g.kx, g.top + g.height * g.ky)];
         }
 
         // Move the view, within its limits. True when that changed it.
@@ -1257,8 +1262,7 @@ const MarkinJS = (function () {
             // Every movement counts, also one too small to change the whole pixels getView() reports,
             // and so does a canvas that changed size: something the host placed with toClient()
             // has to follow.
-            const p = unmap(g.m, g.left, g.top);
-            const q = unmap(g.m, g.left + g.width * g.kx, g.top + g.height * g.ky);
+            const [p, q] = this._shown(g);
             const key = [p.x, p.y, q.x, q.y, g.scale].map((n) => Math.round(n * 1000)).join(' ');
             if (key === this.viewKey) return;
             this.viewKey = key;
@@ -1314,15 +1318,15 @@ const MarkinJS = (function () {
 
         // The part of the image the viewport shows, as the whole pixels that cover it.
         _viewOf(g) {
-            const p = unmap(g.m, g.left, g.top);
-            const q = unmap(g.m, g.left + g.width * g.kx, g.top + g.height * g.ky);
+            const [p, q] = this._shown(g);
+            const seen = extent([Object.values(p), Object.values(q)]);
             const im = g.image;
             const within = (v, from, length) => clamp(v, from, from + length);
             // A crop must hold everything that is visible, so it is rounded outward.
-            const x = within(Math.floor(Math.min(p.x, q.x) + 1e-6), im.x, im.w);
-            const y = within(Math.floor(Math.min(p.y, q.y) + 1e-6), im.y, im.h);
-            const right = within(Math.ceil(Math.max(p.x, q.x) - 1e-6), im.x, im.w);
-            const bottom = within(Math.ceil(Math.max(p.y, q.y) - 1e-6), im.y, im.h);
+            const x = within(Math.floor(seen.x1 + 1e-6), im.x, im.w);
+            const y = within(Math.floor(seen.y1 + 1e-6), im.y, im.h);
+            const right = within(Math.ceil(seen.x2 - 1e-6), im.x, im.w);
+            const bottom = within(Math.ceil(seen.y2 - 1e-6), im.y, im.h);
             return { x, y, width: right - x, height: bottom - y, scale: g.scale };
         }
 
@@ -1359,7 +1363,7 @@ const MarkinJS = (function () {
             if (!g) return false;
             // Around the given point of the image, or else the middle of the viewport.
             const c = at
-                ? { x: g.m.a * at.x + g.m.c * at.y + g.m.e, y: g.m.b * at.x + g.m.d * at.y + g.m.f }
+                ? map(g.m, at.x, at.y)
                 : { x: g.left + (g.width * g.kx) / 2, y: g.top + (g.height * g.ky) / 2 };
             this._zoomAt(this.view.scale * factor, c.x, c.y, g);
             return true;
@@ -1420,7 +1424,7 @@ const MarkinJS = (function () {
                 return null;
             }
             const m = this._matrix();
-            return m ? { x: m.a * x + m.c * y + m.e, y: m.b * x + m.d * y + m.f } : { x, y };
+            return m ? map(m, x, y) : { x, y };
         }
 
         // ---- zoom and pan by hand
