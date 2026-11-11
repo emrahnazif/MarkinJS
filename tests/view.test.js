@@ -1,5 +1,24 @@
 import { describe, it, expect } from 'vitest';
-import { MarkinJS, makeEditor, track, setBox, handleEl, num, BOX, SVG_NS } from './setup.js';
+import {
+    MarkinJS,
+    makeEditor,
+    track,
+    setBox,
+    screenOf,
+    press,
+    move,
+    release,
+    click,
+    key,
+    keyUp,
+    bboxEl,
+    polygonEl,
+    keypointEl,
+    handleEl,
+    num,
+    BOX,
+    SVG_NS
+} from './setup.js';
 
 // A 1600 x 1200 image shown at 800 x 600, 20px from the top-left of the page:
 // at rest one image pixel is half a pixel on screen.
@@ -347,5 +366,124 @@ describe('an editor that could not be given a viewport', () => {
         } finally {
             window.getComputedStyle = real;
         }
+    });
+});
+
+describe('editing while zoomed in', () => {
+    // Small things around the middle of the image, so they stay in view at 16x.
+    const THINGS = [
+        { id: 'box', bbox: [780, 590, 40, 20] },
+        {
+            id: 'shape',
+            segments: [
+                [790, 560],
+                [820, 560],
+                [805, 580]
+            ]
+        },
+        { id: 'dot', keypoints: [{ name: 'tip', point: [770, 620] }] }
+    ];
+    const near = (actual, expected) => actual.forEach((n, i) => expect(n).toBeCloseTo(expected[i], 6));
+
+    for (const zoom of [1, 4, 16]) {
+        describe(`at ${zoom}x`, () => {
+            const start = () => {
+                const made = makeEditor({ annotations: THINGS }, HALF);
+                made.editor.zoomBy(zoom, { x: 800, y: 600 });
+                expect(made.editor.getView().scale).toBe(zoom / 2);
+                // Drag `target` from one image point to another, in two moves.
+                made.pull = (target, from, to) => {
+                    const a = screenOf(made.svg, from[0], from[1]);
+                    const b = screenOf(made.svg, to[0], to[1]);
+                    press(target, a[0], a[1]);
+                    move((a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
+                    move(b[0], b[1]);
+                    release(b[0], b[1]);
+                };
+                return made;
+            };
+
+            it('moves a box by the distance the pointer travels in the image', () => {
+                const { editor, svg, pull } = start();
+                editor.select('box');
+                pull(bboxEl(svg, 'box'), [800, 600], [812, 595]);
+                near(editor.getAnnotation('box').bbox, [792, 585, 40, 20]);
+            });
+
+            it('resizes a box by its corner', () => {
+                const { editor, svg, pull } = start();
+                editor.select('box');
+                pull(handleEl(svg, 'se'), [820, 610], [828, 616]);
+                near(editor.getAnnotation('box').bbox, [780, 590, 48, 26]);
+                pull(handleEl(svg, 'nw'), [780, 590], [772, 596]);
+                near(editor.getAnnotation('box').bbox, [772, 596, 56, 20]);
+            });
+
+            it('moves one vertex of a polygon', () => {
+                const { editor, svg, pull } = start();
+                editor.select('shape', 'polygon');
+                pull(handleEl(svg, 'vertex', 2), [805, 580], [800, 586]);
+                const moved = editor.getAnnotation('shape').segments;
+                near(moved[2], [800, 586]);
+                expect(moved.slice(0, 2)).toEqual(THINGS[1].segments.slice(0, 2));
+                pull(polygonEl(svg, 'shape'), [805, 565], [795, 570]);
+                near(editor.getAnnotation('shape').segments[0], [780, 565]);
+            });
+
+            it('moves a keypoint', () => {
+                const { editor, svg, pull } = start();
+                const at = screenOf(svg, 770, 620);
+                click(keypointEl(svg, 'dot', 0), at[0], at[1]);
+                expect(editor.getSelection()).toMatchObject({ id: 'dot', part: 'keypoint', index: 0 });
+                pull(keypointEl(svg, 'dot', 0), [770, 620], [775, 612]);
+                near(editor.getAnnotation('dot').keypoints[0].point, [775, 612]);
+            });
+
+            it('still takes three pixels on screen to start a drag, and a click still selects', () => {
+                const { editor, svg } = start();
+                const [x, y] = screenOf(svg, 800, 600);
+                click(bboxEl(svg, 'box'), x, y);
+                expect(editor.getSelection().id).toBe('box');
+                press(bboxEl(svg, 'box'), x, y);
+                move(x + 2, y);
+                release(x + 2, y);
+                expect(editor.getAnnotation('box')).toEqual(THINGS[0]);
+            });
+
+            it('reports clicks on the canvas where they are in the image', () => {
+                const { editor, svg } = start();
+                const clicks = [];
+                editor.on('canvasclick', (e) => clicks.push(e.position));
+                const [x, y] = screenOf(svg, 815, 630);
+                click(svg, x, y);
+                near([clicks[0].x, clicks[0].y], [815, 630]);
+            });
+
+            it('nudges by one image pixel, whatever the zoom', () => {
+                const { editor } = start();
+                editor.select('box');
+                key('ArrowRight');
+                key('ArrowDown', { shiftKey: true });
+                keyUp('ArrowDown');
+                expect(editor.getAnnotation('box').bbox).toEqual([781, 600, 40, 20]);
+            });
+
+            it('keeps a handle five pixels on screen', () => {
+                const { editor, svg } = start();
+                editor.select('box');
+                expect(num(svg.querySelector('.markin-handle'), 'r') * editor.getView().scale).toBeCloseTo(5, 6);
+            });
+        });
+    }
+
+    it('stops a drag at the edge of the image, also when the edge is out of view', () => {
+        const { editor, svg } = makeEditor({ annotations: THINGS }, HALF);
+        editor.zoomBy(4, { x: 800, y: 600 });
+        editor.select('box');
+        const a = screenOf(svg, 800, 600);
+        press(bboxEl(svg, 'box'), a[0], a[1]);
+        move(a[0] + 5000, a[1] + 5000);
+        release(a[0] + 5000, a[1] + 5000);
+        expect(editor.getAnnotation('box').bbox).toEqual([1560, 1180, 40, 20]);
     });
 });

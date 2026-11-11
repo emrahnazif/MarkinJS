@@ -137,6 +137,12 @@ export function cleanup() {
 }
 afterEach(cleanup);
 
+// Where an image point is on screen, worked out from the layout above and not by the library.
+export function screenOf(svg, x, y) {
+    const m = svg.getScreenCTM();
+    return [m.a * x + m.e, m.d * y + m.f];
+}
+
 // ---- pointer
 
 export function pointer(type, target, x, y, init = {}) {
