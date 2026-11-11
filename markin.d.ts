@@ -125,6 +125,8 @@ declare namespace MarkinJS {
          * only moves when the methods are called.
          */
         zoomControls?: boolean;
+        /** A drag that starts on empty canvas moves the view, once it is zoomed in. Default `true`. */
+        panOnEmpty?: boolean;
         /**
          * What a plain wheel or two-finger scroll does: `'pan'` (default) moves the view, `'zoom'` zooms
          * towards the pointer. Ctrl / Cmd + wheel and a trackpad pinch always zoom.

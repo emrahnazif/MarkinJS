@@ -7,10 +7,16 @@ import {
     screenOf,
     wheel,
     gesture,
+    pointer,
     press,
     move,
     release,
+    click,
+    key,
+    keyUp,
     bboxEl,
+    handleEl,
+    BOX,
     SVG_NS
 } from './setup.js';
 
@@ -275,5 +281,295 @@ describe('zoomControls: false', () => {
         } finally {
             window.getComputedStyle = real;
         }
+    });
+});
+
+describe('dragging the view', () => {
+    const ZOOMED = { x: 600, y: 450, width: 400, height: 300, scale: 2 };
+    // A box in the middle of the image, and the editor zoomed in 4x on it.
+    const THING = { id: 'box', bbox: [700, 500, 200, 200] };
+    function zoomed(options) {
+        const made = clocked({ annotations: [THING], settleDelay: 30, ...options });
+        made.editor.zoomBy(4);
+        expect(made.editor.getView()).toEqual(ZOOMED);
+        // Everything the host could hear about a selection or an edit.
+        made.heard = [];
+        for (const type of ['change', 'select', 'deselect', 'dragstart', 'drag', 'dragend', 'canvasclick']) {
+            made.editor.on(type, () => made.heard.push(type));
+        }
+        return made;
+    }
+    const viewport = (editor) => editor.getContainerElement();
+    // Hold Space with the pointer over the editor.
+    const holdSpace = (svg) => {
+        pointer('pointermove', svg, 100, 100, { buttons: 0 });
+        return key(' ', { code: 'Space' });
+    };
+    const MIDDLE = { button: 1, buttons: 4 };
+
+    describe('from empty canvas', () => {
+        it('moves the view with the pointer', () => {
+            const { editor, svg, heard } = zoomed();
+            press(svg, 100, 100);
+            const first = move(60, 80);
+            expect(first.defaultPrevented).toBe(true);
+            // 40px left and 20px up on screen: 20 and 10 image pixels further right and down.
+            expect(editor.getView()).toEqual({ x: 620, y: 460, width: 400, height: 300, scale: 2 });
+            move(0, 0);
+            release(0, 0);
+            expect(editor.getView()).toEqual({ x: 650, y: 500, width: 400, height: 300, scale: 2 });
+            expect(heard).toEqual([]);
+        });
+
+        it('leaves a click a click', () => {
+            const { editor, svg, heard } = zoomed();
+            editor.select('box');
+            heard.length = 0;
+            press(svg, 100, 100);
+            move(101, 101);
+            release(101, 101);
+            expect(heard).toEqual(['deselect', 'canvasclick']);
+            expect(editor.getView()).toEqual(ZOOMED);
+        });
+
+        it("stops a handle's width past the edge of the image", () => {
+            const { editor, svg } = zoomed();
+            press(svg, 100, 100);
+            move(5000, 5000);
+            expect(viewport(editor).firstChild.style.transform).toBe('translate(12px, 12px) scale(4)');
+            expect(editor.getView()).toEqual({ x: 0, y: 0, width: 394, height: 294, scale: 2 });
+            // Coming back, the view follows at once.
+            move(4990, 4990);
+            expect(viewport(editor).firstChild.style.transform).toBe('translate(2px, 2px) scale(4)');
+            release(4990, 4990);
+        });
+
+        it('does nothing while the whole image is in view', () => {
+            const { editor, svg } = clocked({ annotations: [THING] });
+            press(svg, 100, 100);
+            const event = move(60, 80);
+            release(60, 80);
+            expect(event.defaultPrevented).toBe(false);
+            expect(editor.getView()).toEqual(WHOLE);
+            expect(viewport(editor).style.cursor).toBe('');
+        });
+
+        it('can be switched off with panOnEmpty: false', () => {
+            const { editor, svg, heard } = zoomed({ panOnEmpty: false });
+            press(svg, 100, 100);
+            move(60, 80);
+            release(60, 80);
+            expect(editor.getView()).toEqual(ZOOMED);
+            click(svg, 100, 100);
+            expect(heard).toEqual(['canvasclick']);
+        });
+    });
+
+    describe('from an annotation', () => {
+        it('selects or moves the annotation, not the view', () => {
+            const { editor, svg } = zoomed();
+            const [x, y] = screenOf(svg, 800, 600);
+            press(bboxEl(svg, 'box'), x, y);
+            move(x + 40, y);
+            release(x + 40, y);
+            expect(editor.getSelection().id).toBe('box');
+            expect(editor.getAnnotation('box')).toEqual(THING);
+
+            press(bboxEl(svg, 'box'), x, y);
+            move(x + 40, y);
+            release(x + 40, y);
+            expect(editor.getAnnotation('box').bbox).toEqual([720, 500, 200, 200]);
+            expect(editor.getView()).toEqual(ZOOMED);
+        });
+    });
+
+    describe('with Space held', () => {
+        it('moves the view from anywhere, and touches nothing', () => {
+            const { editor, svg, heard } = zoomed();
+            editor.select('box');
+            heard.length = 0;
+            expect(holdSpace(svg).defaultPrevented).toBe(true);
+            expect(viewport(editor).style.cursor).toBe('grab');
+
+            const [x, y] = screenOf(svg, 800, 600);
+            const down = press(handleEl(svg, 'se'), x, y);
+            expect(down.defaultPrevented).toBe(true);
+            move(x - 40, y - 20);
+            expect(viewport(editor).style.cursor).toBe('grabbing');
+            release(x - 40, y - 20);
+            expect(editor.getView()).toEqual({ x: 620, y: 460, width: 400, height: 300, scale: 2 });
+            expect(editor.getAnnotation('box')).toEqual(THING);
+            expect(editor.getSelection().id).toBe('box');
+            expect(heard).toEqual([]);
+
+            keyUp(' ');
+            expect(viewport(editor).style.cursor).toBe('');
+            // And the annotation takes the pointer again.
+            press(bboxEl(svg, 'box'), x, y);
+            move(x + 40, y);
+            release(x + 40, y);
+            expect(editor.getAnnotation('box').bbox).toEqual([720, 500, 200, 200]);
+        });
+
+        it('shows the hand over the annotations too, by taking the pointer off them', () => {
+            const { svg } = zoomed();
+            const layer = svg.querySelector('.markin-layer');
+            holdSpace(svg);
+            expect(layer.style.pointerEvents).toBe('none');
+            key(' ', { code: 'Space', repeat: true });
+            expect(layer.style.pointerEvents).toBe('none');
+            keyUp(' ');
+            expect(layer.style.pointerEvents).toBe('');
+        });
+
+        it('only counts while the pointer is over the editor', () => {
+            const { editor, svg } = zoomed();
+            // The pointer has not been over it yet.
+            expect(key(' ', { code: 'Space' }).defaultPrevented).toBe(false);
+            pointer('pointermove', svg, 100, 100, { buttons: 0 });
+            pointer('pointerleave', viewport(editor), 900, 900, { buttons: 0 });
+            expect(key(' ', { code: 'Space' }).defaultPrevented).toBe(false);
+            expect(viewport(editor).style.cursor).toBe('');
+        });
+
+        it('is left alone while the user types', () => {
+            const { svg } = zoomed();
+            const field = document.createElement('input');
+            document.body.appendChild(field);
+            pointer('pointermove', svg, 100, 100, { buttons: 0 });
+            expect(key(' ', { code: 'Space' }, field).defaultPrevented).toBe(false);
+        });
+
+        for (const off of [{ keyboardControls: false }, { zoomControls: false }]) {
+            it(`is left alone with ${Object.keys(off)[0]}: false`, () => {
+                const { editor, svg } = zoomed(off);
+                expect(holdSpace(svg).defaultPrevented).toBe(false);
+                expect(viewport(editor).style.cursor).toBe('');
+            });
+        }
+
+        it('is let go when the window loses focus', () => {
+            const { editor, svg } = zoomed();
+            holdSpace(svg);
+            window.dispatchEvent(new Event('blur'));
+            expect(viewport(editor).style.cursor).toBe('');
+            const [x, y] = screenOf(svg, 800, 600);
+            press(bboxEl(svg, 'box'), x, y);
+            release(x, y);
+            expect(editor.getSelection().id).toBe('box');
+        });
+    });
+
+    describe('with the middle button', () => {
+        it('moves the view from anywhere', () => {
+            const { editor, svg, heard } = zoomed();
+            const [x, y] = screenOf(svg, 800, 600);
+            const down = press(bboxEl(svg, 'box'), x, y, MIDDLE);
+            expect(down.defaultPrevented).toBe(true);
+            move(x - 40, y - 20, MIDDLE);
+            release(x - 40, y - 20, { button: 1 });
+            expect(editor.getView()).toEqual({ x: 620, y: 460, width: 400, height: 300, scale: 2 });
+            expect(editor.getSelection()).toBe(null);
+            expect(heard).toEqual([]);
+        });
+
+        it('keeps the browser from scrolling or pasting with it', () => {
+            const { svg } = zoomed();
+            const mouse = (type, button) => {
+                const event = new MouseEvent(type, { bubbles: true, cancelable: true, button });
+                svg.dispatchEvent(event);
+                return event.defaultPrevented;
+            };
+            expect(mouse('mousedown', 1)).toBe(true);
+            expect(mouse('auxclick', 1)).toBe(true);
+            expect(mouse('mousedown', 0)).toBe(false);
+            expect(mouse('mousedown', 2)).toBe(false);
+        });
+
+        it('ends when the button was let go where the editor could not see it', () => {
+            const { editor, svg } = zoomed();
+            press(svg, 100, 100, MIDDLE);
+            move(60, 80, MIDDLE);
+            move(0, 0, { buttons: 0 });
+            move(-100, -100, { buttons: 0 });
+            expect(editor.getView()).toEqual({ x: 620, y: 460, width: 400, height: 300, scale: 2 });
+        });
+    });
+
+    it('does not let the view settle while it is held', async () => {
+        const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        vi.restoreAllMocks();
+        const { editor, svg } = zoomed();
+        await wait(80);
+        const settles = [];
+        editor.on('viewsettle', (view) => settles.push(view));
+        press(svg, 100, 100);
+        move(60, 80);
+        await wait(80);
+        expect(settles).toEqual([]);
+        move(0, 0);
+        release(0, 0);
+        await wait(80);
+        expect(settles).toEqual([{ x: 650, y: 500, width: 400, height: 300, scale: 2 }]);
+    });
+
+    it('swallows the click that ends a drag of the view, and only that one', async () => {
+        const { svg } = zoomed();
+        let clicks = 0;
+        svg.addEventListener('click', () => clicks++);
+        const send = () => svg.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        press(svg, 100, 100);
+        move(60, 80);
+        release(60, 80);
+        send();
+        expect(clicks).toBe(0);
+        send();
+        expect(clicks).toBe(1);
+
+        // A drag that no click follows leaves the next real click alone.
+        press(svg, 100, 100);
+        move(60, 80);
+        release(60, 80);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        send();
+        expect(clicks).toBe(2);
+    });
+
+    it('goes on while the data changes under it, and Escape lets go', () => {
+        const { editor, svg } = zoomed();
+        press(svg, 100, 100);
+        move(60, 80);
+        editor.createAnnotation(BOX, { select: false });
+        editor.updateAnnotation('box', { class_id: 3 });
+        move(0, 0);
+        expect(editor.getView()).toEqual({ x: 650, y: 500, width: 400, height: 300, scale: 2 });
+
+        key('Escape');
+        move(-100, -100);
+        release(-100, -100);
+        expect(editor.getView()).toEqual({ x: 650, y: 500, width: 400, height: 300, scale: 2 });
+    });
+
+    it('is off with zoomControls: false', () => {
+        const { editor, svg } = zoomed({ zoomControls: false });
+        press(svg, 100, 100);
+        move(60, 80);
+        release(60, 80);
+        const [x, y] = screenOf(svg, 800, 600);
+        press(bboxEl(svg, 'box'), x, y, MIDDLE);
+        move(x - 40, y, MIDDLE);
+        release(x - 40, y, { button: 1 });
+        expect(editor.getView()).toEqual(ZOOMED);
+    });
+
+    it('ends with the editor', () => {
+        const { editor, svg } = zoomed();
+        press(svg, 100, 100);
+        move(60, 80);
+        editor.destroy();
+        expect(() => {
+            move(0, 0);
+            release(0, 0);
+        }).not.toThrow();
     });
 });

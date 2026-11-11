@@ -55,6 +55,7 @@ const MarkinJS = (function () {
         maxScale: [32, 'positive'],
         settleDelay: [250, 'delay'],
         zoomControls: [true, 'boolean'],
+        panOnEmpty: [true, 'boolean'],
         wheel: ['pan', 'wheel'],
         strict: [false, 'boolean'],
         silent: [false, 'boolean'],
@@ -558,7 +559,8 @@ const MarkinJS = (function () {
         viewport.style.cssText = `position:relative;display:${blockLevel ? 'block' : 'inline-block'};line-height:0`;
         const stage = doc.createElement('div');
         stage.className = 'markin-stage';
-        stage.style.cssText = 'position:relative';
+        // Nothing in the stage is text: a drag across it moves the view, it does not select.
+        stage.style.cssText = 'position:relative;user-select:none;-webkit-user-select:none';
         subject.parentNode.insertBefore(viewport, subject);
         viewport.appendChild(stage);
         stage.appendChild(subject);
@@ -776,6 +778,9 @@ const MarkinJS = (function () {
             this.hoverEvent = null;
             this.wheelRun = null; // the wheel movement in progress: when it was last heard, and whether it is ours
             this.pinch = null; // a WebKit pinch in progress: the scale it began at, and where
+            this.space = false; // Space is held with the pointer over the editor: a drag moves the view
+            this.inside = false; // the pointer is over the editor
+            this.pressed = null; // the press last heard, which arrives once on the <svg> and once on the viewport
             this.warnedBounds = false;
 
             this._build();
@@ -820,6 +825,15 @@ const MarkinJS = (function () {
             if (this.viewport) {
                 const vp = this.viewport;
                 this.cleanup.push(
+                    // A press the <svg> did not take: on the image under a disabled overlay, or
+                    // beside the picture.
+                    on(vp, 'pointerdown', '_onPointerDown'),
+                    on(vp, 'pointermove', '_onInside'),
+                    on(vp, 'pointerleave', '_onOutside'),
+                    on(vp, 'mousedown', '_onMiddle'),
+                    on(vp, 'auxclick', '_onMiddle'),
+                    on(vp, 'dragstart', '_onNativeDrag'),
+                    weakListen(this.win, 'blur', this, '_onBlur'),
                     on(vp, 'wheel', '_onWheel', { passive: false }),
                     // WebKit's own events for a trackpad pinch. Other browsers never send them.
                     on(vp, 'gesturestart', '_onPinch', { passive: false }),
@@ -854,6 +868,7 @@ const MarkinJS = (function () {
 
         destroy() {
             if (this.dead) return;
+            if (this.gesture) this._finishGesture(true);
             this._settle();
             this.dead = true;
             this.enabled = false;
@@ -1238,6 +1253,8 @@ const MarkinJS = (function () {
 
         _armSettle() {
             clearTimeout(this.settleTimer);
+            // Not while the view is held: a pause in a drag is not the end of it.
+            if (this.gesture && this.gesture.kind === 'pan') return;
             this.settleTimer = this._later(() => this._settleView(), this.opts.settleDelay);
         }
 
@@ -1674,7 +1691,8 @@ const MarkinJS = (function () {
 
         // Finish anything in flight (a drag, uncommitted nudges) before another change is made.
         _settle() {
-            if (this.gesture) this._finishGesture(true);
+            // A drag of the view holds nothing that another change could upset, and goes on.
+            if (this.gesture && this.gesture.key !== undefined) this._finishGesture(true);
             this._flushNudge();
         }
 
@@ -1978,6 +1996,7 @@ const MarkinJS = (function () {
             if (this.dead || this.enabled) return;
             this.enabled = true;
             this.layer.style.pointerEvents = '';
+            this._showGrab();
             if (this.host) this.svg.style.pointerEvents = '';
             this.svg.style.touchAction = 'none';
             this._remeasure();
@@ -2373,29 +2392,45 @@ const MarkinJS = (function () {
         }
 
         _onPointerDown(event) {
+            // One press is heard on the <svg> and, unless that took it, again on the viewport.
+            if (this.pressed === event) return;
+            this.pressed = event;
+            this.inside = true;
             if (!this.enabled) return;
             claimKeyboard(this, true);
-            if (event.isPrimary === false || event.button !== 0) return;
+            if (event.isPrimary === false) return;
+            // Space or the middle button: this drag moves the view, whatever it starts on.
+            const grab = this._pans() && (event.button === 1 || (event.button === 0 && this.space));
+            if (!grab && event.button !== 0) return;
             if (this.gesture) {
                 if (this.gesture.pointerId !== event.pointerId) return; // a second finger
                 // The same pointer cannot go down twice, so the earlier release was missed.
                 this._finishGesture(!this.gesture.live);
             }
             // Resolve the target first: the calls below may redraw the handles.
-            const hit = this._hit(event.target);
+            const hit = grab ? null : this._hit(event.target);
             this._flushNudge();
             this._remeasure();
             if (!this.enabled) return; // a change listener may have run
 
             const gesture = {
-                kind: 'canvas',
+                kind: grab ? 'pan' : 'canvas',
                 pointerId: event.pointerId,
+                button: event.button,
                 clientX: event.clientX,
                 clientY: event.clientY,
+                // Where the pointer was when the view last followed it.
+                lastX: event.clientX,
+                lastY: event.clientY,
                 moved: false,
                 live: false
             };
-            if (hit) {
+            if (grab) {
+                // Ours alone: nothing is selected, nothing scrolls, and the page does not hear of it.
+                event.preventDefault();
+                event.stopPropagation();
+                this._capture(gesture, this.viewport);
+            } else if (hit) {
                 // The press is ours: keep the page, and any pan/zoom library around us, out of it.
                 event.preventDefault();
                 event.stopPropagation();
@@ -2403,12 +2438,7 @@ const MarkinJS = (function () {
                 const target = this._pressTarget(hit, this._toLocal(event.clientX, event.clientY));
                 if (!target) return;
                 Object.assign(gesture, target);
-                try {
-                    this.svg.setPointerCapture(event.pointerId);
-                    gesture.captured = true;
-                } catch {
-                    // Without capture the window listeners below still follow the pointer.
-                }
+                this._capture(gesture, this.svg);
             }
             this.gesture = gesture;
             // The rest of the press is followed on window, wherever the pointer goes.
@@ -2417,6 +2447,84 @@ const MarkinJS = (function () {
                 listen(this.win, 'pointerup', (e) => this._onGestureEnd(e, false), true),
                 listen(this.win, 'pointercancel', (e) => this._onGestureEnd(e, true), true)
             ];
+            this._showGrab();
+        }
+
+        _capture(gesture, element) {
+            try {
+                element.setPointerCapture(gesture.pointerId);
+                gesture.captured = element;
+            } catch {
+                // Without capture the window listeners still follow the pointer.
+            }
+        }
+
+        // ---- moving the view by dragging
+
+        // A hand over the whole editor while a drag would move the view, or does. The annotations
+        // stop taking the pointer for that time, so the hand shows over them as well.
+        _showGrab() {
+            if (!this.viewport) return;
+            const dragging = !!this.gesture && this.gesture.kind === 'pan';
+            this.viewport.style.cursor = dragging ? 'grabbing' : this.space ? 'grab' : this.frame.cursor || '';
+            this.layer.style.pointerEvents = dragging || this.space || !this.enabled ? 'none' : '';
+        }
+
+        _onInside() {
+            this.inside = true;
+        }
+
+        _onOutside() {
+            this.inside = false;
+        }
+
+        // The middle button must not start the browser's own scrolling, paste or open anything.
+        _onMiddle(event) {
+            if (event.button === 1 && this._pans()) event.preventDefault();
+        }
+
+        // A press that is being followed must not turn into the browser dragging the image away.
+        _onNativeDrag(event) {
+            if (this.gesture) event.preventDefault();
+        }
+
+        _onBlur() {
+            if (!this.space) return;
+            this.space = false;
+            this._showGrab();
+        }
+
+        // Space, held with the pointer over the editor, makes the next drag move the view.
+        // It follows the pointer, not the editor that was used last. True when the key was taken.
+        _onSpace(event, down) {
+            if (event.code !== 'Space' && event.key !== ' ') return false;
+            if (down && !this.space) {
+                if (!this.inside || !this._pans() || event.ctrlKey || event.metaKey || event.altKey) return false;
+            } else if (!this.space) {
+                return false;
+            }
+            // Also on the way up, and while it repeats: the page must not scroll or press a button.
+            event.preventDefault();
+            if (this.space !== down) {
+                this.space = down;
+                this._showGrab();
+            }
+            return true;
+        }
+
+        // The click the browser sends when a drag of the view is released is not a click.
+        _swallowClick() {
+            const stop = listen(
+                this.win,
+                'click',
+                (event) => {
+                    event.stopPropagation();
+                    event.preventDefault();
+                    stop();
+                },
+                true
+            );
+            setTimeout(stop, 0);
         }
 
         // What a press on `hit` starts, or null if nothing. Host code (blur handlers, select
@@ -2515,14 +2623,35 @@ const MarkinJS = (function () {
         _onGestureMove(event) {
             const g = this.gesture;
             if (!g || event.pointerId !== g.pointerId) return;
-            // A mouse move without the left button means the release happened where we could not see it.
-            if (event.pointerType === 'mouse' && (event.buttons & 1) === 0) {
+            // A mouse move without its button means the release happened where we could not see it.
+            if (event.pointerType === 'mouse' && (event.buttons & (g.button === 1 ? 4 : 1)) === 0) {
                 this._finishGesture(false);
                 return;
             }
             if (!g.moved) {
                 if (Math.hypot(event.clientX - g.clientX, event.clientY - g.clientY) < DRAG_THRESHOLD) return;
                 g.moved = true;
+                // A drag that began on empty canvas moves the view, when there is somewhere to go.
+                if (g.kind === 'canvas' && this.opts.panOnEmpty && this._pans() && this.view.scale > 1) {
+                    g.kind = 'pan';
+                }
+                if (g.kind === 'pan') {
+                    g.live = true;
+                    this._showGrab();
+                }
+            }
+            if (g.kind === 'pan') {
+                event.preventDefault();
+                const geo = this._geometry();
+                if (geo) {
+                    const v = this.view;
+                    const dx = (event.clientX - g.lastX) / geo.kx;
+                    const dy = (event.clientY - g.lastY) / geo.ky;
+                    this._setView(v.scale, v.x + dx, v.y + dy, geo);
+                }
+                g.lastX = event.clientX;
+                g.lastY = event.clientY;
+                return;
             }
             if (g.kind === 'canvas' || g.kind === 'press') return;
             event.preventDefault();
@@ -2557,10 +2686,17 @@ const MarkinJS = (function () {
             for (const stop of g.stops) stop();
             if (g.captured) {
                 try {
-                    this.svg.releasePointerCapture(g.pointerId);
+                    g.captured.releasePointerCapture(g.pointerId);
                 } catch {
                     // Already released.
                 }
+            }
+            if (g.kind === 'pan') {
+                this._showGrab();
+                if (g.moved && event && !cancelled && g.button === 0) this._swallowClick();
+                // The view was not allowed to settle while it was held.
+                if (g.moved) this._viewChanged();
+                return;
             }
             if (g.kind === 'canvas') {
                 if (!g.moved && !cancelled) {
@@ -2604,9 +2740,11 @@ const MarkinJS = (function () {
         // ---- keyboard
 
         _onKeyDown(event) {
-            if (!this.enabled || !this.opts.keyboardControls || keyboardOwner() !== this) return;
+            if (!this.enabled || !this.opts.keyboardControls) return;
             if (event.defaultPrevented || event.isComposing) return;
             if (typeof event.key !== 'string' || isTypingTarget(event)) return;
+            if (this._onSpace(event, true)) return;
+            if (keyboardOwner() !== this) return;
 
             const mod = event.ctrlKey || event.metaKey;
             let key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
@@ -2652,7 +2790,9 @@ const MarkinJS = (function () {
         }
 
         _onKeyUp(event) {
-            if (typeof event.key === 'string' && own(ARROWS, event.key)) this._flushNudge();
+            if (typeof event.key !== 'string') return;
+            if (this._onSpace(event, false)) return;
+            if (own(ARROWS, event.key)) this._flushNudge();
         }
     }
 
