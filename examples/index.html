@@ -7,21 +7,56 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" href="assets/css/bulma.min.css">
     <link rel="stylesheet" href="assets/css/child.css">
-    <script src="../dist/markin.js"></script>
+    <!-- The source file works as a plain script. No build step is needed to run this page. -->
+    <script src="../markin.js"></script>
 
     <style>
-        .event-log {
-            height: 150px;
-            overflow-y: auto;
+        .stage {
+            max-height: 70vh;
+            overflow: auto;
+            /* Room for the handles of a box that touches the image edge. */
+            padding: 14px;
+            background: #0f172a;
+            border-radius: 6px;
+            line-height: 0;
+        }
+
+        .stage img {
+            display: block;
+            width: 100%;
+            max-width: none;
+        }
+
+        .event-log,
+        .data-view {
+            height: 220px;
+            overflow: auto;
             background: #1e293b;
             color: #e2e8f0;
             padding: 0.75rem;
             border-radius: 6px;
             font-family: monospace;
-            font-size: 0.85rem;
+            font-size: 0.8rem;
+            white-space: pre;
+        }
+
+        .controls-panel .title {
+            margin-bottom: 0.5rem;
+        }
+
+        .controls-panel .buttons,
+        .controls-panel .field {
+            margin-bottom: 1rem;
+        }
+
+        .swatch {
+            display: inline-block;
+            width: 0.75em;
+            height: 0.75em;
+            border-radius: 2px;
+            margin-right: 0.35em;
         }
     </style>
-
 </head>
 
 <body>
@@ -36,12 +71,8 @@
                 <div class="navbar-end">
                     <div class="navbar-item">
                         <div class="buttons">
-                            <a href="index.html" class="button is-dark">
-                                Home
-                            </a>
-                            <a href="api.html" class="button is-light">
-                                API Documentation
-                            </a>
+                            <a href="index.html" class="button is-dark">Home</a>
+                            <a href="api.html" class="button is-light">API Documentation</a>
                         </div>
                     </div>
                 </div>
@@ -49,66 +80,79 @@
         </div>
     </nav>
 
-        <section class="section">
-            <div class="container">
-                <h1 class="title">MarkinJS Interactive Examples</h1>
-                <h2 class="subtitle">
-                    Explore features with live demonstrations.
-                </h2>
-            </div>
-        </section>
-
     <section class="section">
+        <div class="container">
+            <h1 class="title">MarkinJS Interactive Example</h1>
+            <h2 class="subtitle">
+                Click an annotation to select it, then drag it, its corners, its vertices or its keypoints.
+                Works with mouse, touch and pen.
+            </h2>
+        </div>
+    </section>
+
+    <section class="section pt-0">
         <div class="container">
             <div class="columns">
                 <div class="column is-8">
-                    <div class="demo-container">
-                        <div class="demo-image-container">
-                            <img id="demo-image" src="assets/images/image.jpg" alt="Demo Image">
+                    <div class="stage" id="stage">
+                        <img id="demo-image" src="assets/images/image.jpg" alt="Harbour with boats, a tyre and chairs">
+                    </div>
+                    <p class="help">Coordinates are in image pixels (1280 × 853), whatever size the image is shown at.</p>
+                </div>
+
+                <div class="column is-4">
+                    <div class="controls-panel">
+                        <h4 class="title is-6">Add an annotation</h4>
+                        <div class="buttons">
+                            <button id="add-box" class="button is-dark is-small">Box</button>
+                            <button id="add-polygon" class="button is-dark is-small">Box + polygon</button>
+                            <button id="add-keypoints" class="button is-dark is-small">Box + keypoints</button>
+                            <button id="add-points" class="button is-dark is-small">Keypoints only</button>
+                        </div>
+
+                        <h4 class="title is-6">Selected annotation</h4>
+                        <div class="field has-addons">
+                            <div class="control">
+                                <div class="select is-small">
+                                    <select id="class-select" disabled aria-label="Class of the selected annotation"></select>
+                                </div>
+                            </div>
+                            <div class="control">
+                                <button id="delete-selected" class="button is-danger is-small" disabled>Delete</button>
+                            </div>
+                        </div>
+                        <p class="help" id="selection-info">Nothing selected.</p>
+
+                        <h4 class="title is-6">Edit</h4>
+                        <div class="buttons">
+                            <button id="undo" class="button is-info is-small" disabled>Undo</button>
+                            <button id="redo" class="button is-info is-small" disabled>Redo</button>
+                            <button id="clear" class="button is-warning is-small">Clear all</button>
+                            <button id="reset" class="button is-light is-small">Reload sample</button>
+                        </div>
+
+                        <h4 class="title is-6">Behaviour</h4>
+                        <div class="field">
+                            <label class="checkbox is-size-7"><input type="checkbox" data-option="bindElements" checked> Polygon and keypoints follow their box</label><br>
+                            <label class="checkbox is-size-7"><input type="checkbox" data-option="bboxContainPolygon" checked> Keep the polygon inside its box</label><br>
+                            <label class="checkbox is-size-7"><input type="checkbox" data-option="bboxContainKeypoints" checked> Keep keypoints inside their box</label><br>
+                            <label class="checkbox is-size-7"><input type="checkbox" data-option="constrainToImage" checked> Keep everything inside the image</label><br>
+                            <label class="checkbox is-size-7"><input type="checkbox" data-option="requireSelectionToDrag" checked> Select before dragging</label><br>
+                            <label class="checkbox is-size-7"><input type="checkbox" data-option="keyboardControls" checked> Keyboard shortcuts</label><br>
+                            <label class="checkbox is-size-7"><input type="checkbox" id="enabled" checked> Editor enabled</label>
                         </div>
                     </div>
                 </div>
-                <div class="column is-4">
-                    <div class="controls-panel">
-                        <h4 class="title is-5">Basic Controls</h4>
-                        <div class="buttons">
-                            <button id="create-bbox" class="button is-dark is-small">Bounding Box</button>
-                            <button id="create-keypoints" class="button is-dark is-small">Keypoints</button>
-                            <button id="create-polygon" class="button is-dark is-small">Polygon</button>
-                            <button id="create-simple-face" class="button is-dark is-small">Face Detection</button>
-                        </div>
+            </div>
 
-                        <h5 class="title is-6">Advanced Controls</h5>
-                        <div class="buttons">
-                            <button id="create-complex" class="button is-dark is-small">Complex Annotation</button>
-                            <button id="create-bound-elements" class="button is-dark is-small">Bound Elements</button>
-                            <button id="create-unbound-elements" class="button is-dark is-small">Unbound Elements</button>
-                            <button id="create-containment-demo" class="button is-dark is-small">Containment Demo</button>
-                        </div>
-
-                        <h5 class="title is-6">Management</h5>
-                        <div class="buttons">
-                            <button id="delete-selected" class="button is-danger is-small">Delete Selected</button>
-                            <button id="clear-all" class="button is-warning is-small">Clear All</button>
-                            <button id="enable-keyboard" class="button is-success is-small">Enable Keyboard</button>
-                            <button id="disable-keyboard" class="button is-light is-small">Disable Keyboard</button>
-                        </div>
-
-                        <h5 class="title is-6">History</h5>
-                        <div class="buttons">
-                            <button id="undo-btn" class="button is-info is-small" disabled>Undo</button>
-                            <button id="redo-btn" class="button is-info is-small" disabled>Redo</button>
-                            <button id="clear-history" class="button is-light is-small">Clear History</button>
-                        </div>
-
-                        <div class="field">
-                            <label class="label is-small" for="zoom-slider">Zoom Level</label>
-                            <div class="control">
-                                <input id="zoom-slider" class="slider is-fullwidth is-small" step="0.1" min="0.5" max="3" value="1" type="range">
-                            </div>
-                            <p class="help">Current: <span id="zoom-display">1.0x</span></p>
-                        </div>
-                    </div>
+            <div class="columns">
+                <div class="column is-6">
+                    <h5 class="title is-6">Events</h5>
+                    <div id="event-log" class="event-log"></div>
+                </div>
+                <div class="column is-6">
+                    <h5 class="title is-6">Annotations, as handed to <code>change</code></h5>
+                    <div id="data-view" class="data-view"></div>
                 </div>
             </div>
         </div>
@@ -116,140 +160,81 @@
 
     <section class="section">
         <div class="container">
-            <div class="box">
-                <h5 class="title is-6">Event Log</h5>
-                <div id="event-log" class="event-log"></div>
+            <div class="content">
+                <h2 class="title is-3">The code behind this page</h2>
+                <div class="columns is-multiline">
+                    <div class="column is-6">
+                        <div class="box">
+                            <h3 class="title is-5">Create an editor and save on change</h3>
+                            <pre>const editor = MarkinJS.create('demo-image', {
+    annotations: [
+        { id: 'boat', class_id: 0, bbox: [557, 545, 302, 96] }
+    ],
+    colors: { 0: '#2563eb', 1: '#16a34a' }
+});
+
+// One event after every completed edit,
+// carrying the full list in the same format.
+editor.on('change', (annotations) => {
+    save(annotations);
+});</pre>
+                        </div>
+                    </div>
+                    <div class="column is-6">
+                        <div class="box">
+                            <h3 class="title is-5">One format, in and out</h3>
+                            <pre>{
+    "id": "chair",
+    "class_id": 1,
+    "bbox": [x, y, width, height],
+    "segments": [[x, y], [x, y], [x, y]],
+    "keypoints": [
+        { "name": "seat", "point": [x, y], "v": 2 }
+    ]
+}</pre>
+                            <p class="is-size-7">
+                                <code>bbox</code>, <code>segments</code> and <code>keypoints</code> are optional; at least one is
+                                needed. Fields MarkinJS does not know are kept as they are.
+                            </p>
+                        </div>
+                    </div>
+                    <div class="column is-6">
+                        <div class="box">
+                            <h3 class="title is-5">Change things from code</h3>
+                            <pre>const id = editor.createAnnotation({ bbox: [100, 100, 200, 150] });
+editor.updateAnnotation(id, { class_id: 2 });
+editor.select(id);
+editor.deleteAnnotation(id);
+
+editor.load(annotationsFromServer); // replace everything
+editor.undo();</pre>
+                        </div>
+                    </div>
+                    <div class="column is-6">
+                        <div class="box">
+                            <h3 class="title is-5">Keyboard</h3>
+                            <ul>
+                                <li><strong>Arrow keys</strong>: move by 1 pixel, <strong>Shift</strong> by 10, <strong>Ctrl / Cmd</strong> by 0.2</li>
+                                <li><strong>Delete</strong> or <strong>Backspace</strong>: delete the selection</li>
+                                <li><strong>Ctrl / Cmd + Z</strong>: undo. <strong>Ctrl / Cmd + Shift + Z</strong> or <strong>Ctrl + Y</strong>: redo</li>
+                                <li><strong>Escape</strong>: cancel a drag, or deselect</li>
+                            </ul>
+                            <p class="is-size-7">Keys typed into a text field are never taken by the editor.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="has-text-centered">
+                    <a href="api.html" class="button is-dark">View the API documentation</a>
+                </div>
             </div>
         </div>
     </section>
-
-    <section class="section">
-    <div class="container">
-            <div class="columns">
-                <!-- Main Content -->
-                <div class="column is-12">
-                    <div class="content">
-
-                        <!-- Code Examples -->
-                        <section id="code-examples" class="example-section">
-                            <h2 class="title is-3">Code Examples</h2>
-                            
-                            <div class="columns is-multiline">
-                                <div class="column is-12">
-                                    <div class="box">
-                                        <h3 class="title is-4">Basic Annotation</h3>
-                                        <div class="code-example">
-                                            <pre>const annotator = MarkinJS.createImageAnnotator('my-image');
-
-// Simple bounding box
-annotator.createAnnotation({
-    class: "person",
-    bbox: [100, 100, 300, 400]
-});</pre>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <div class="column is-12">
-                                    <div class="box">
-                                        <h3 class="title is-4">Keypoint Detection</h3>
-                                        <div class="code-example">
-                                            <pre>// Face with keypoints
-annotator.createAnnotation({
-    class: "face",
-    bbox: [100, 80, 200, 180],
-    keypoints: [
-        { name: "left_eye", point: [130, 110] },
-        { name: "right_eye", point: [170, 110] },
-        { name: "nose", point: [150, 130] }
-    ]
-});</pre>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <div class="column is-12">
-                                    <div class="box">
-                                        <h3 class="title is-4">Bound Elements</h3>
-                                        <div class="code-example">
-                                            <pre>// Elements that move together
-annotator.createAnnotation({
-    class: "person",
-    bbox: [150, 100, 300, 250],
-    keypoints: [{ name: "head", point: [225, 130] }],
-    bindElements: true,
-    containRules: ["keypoint"]
-});</pre>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <div class="column is-12">
-                                    <div class="box">
-                                        <h3 class="title is-4">Event Handling</h3>
-                                        <div class="code-example">
-                                            <pre>// Listen for interactions
-annotator.on('select', (data) => {
-    console.log('Selected:', data.type);
-});
-
-annotator.on('elementmoved', (data) => {
-    console.log('Moved:', data.deltaX, data.deltaY);
-});</pre>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div class="column is-12">
-                                    <div class="box">
-                                        <h3 class="title is-4">Keyboard Shortcuts</h3>
-                                        <div class="content">
-                                            <div class="columns">
-                                                <div class="column is-6">
-                                                    <ul>
-                                                        <li><strong>Arrow Keys:</strong> Move by 1 pixel</li>
-                                                        <li><strong>Shift + Arrow Keys:</strong> Move by 10 pixels</li>
-                                                        <li><strong>Ctrl + Arrow Keys:</strong> Move by 0.2 pixels</li>
-                                                    </ul>
-                                                </div>
-                                                <div class="column is-6">
-                                                    <ul>
-                                                        <li><strong>Delete Key:</strong> Remove annotation</li>
-                                                        <li><strong>Ctrl + Z:</strong> Undo</li>
-                                                        <li><strong>Ctrl + Shift + Z:</strong> Redo</li>
-                                                    </ul>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </section>
-
-                        <!-- Call to Action -->
-                        <section class="section">
-                            <div class="container has-text-centered">
-                                <h2 class="title is-3">Ready to Build Your Own Tool?</h2>
-                                <p class="subtitle is-5">Start with our comprehensive API documentation</p>
-                                <div class="buttons is-centered">
-                                    <a href="api.html" class="button is-dark">
-                                        View API Documentation
-                                    </a>
-                                </div>
-                            </div>
-                        </section>
-                    </div>
-                </div>
-            </div>
-    </div>
-        </section>
 
     <footer class="footer">
         <div class="container">
             <div class="content has-text-centered">
-                <p>
-                    <strong>MarkinJS</strong> - A lightweight SVG annotation library for computer vision and machine learning.
-                </p>
+                <p><strong>MarkinJS</strong> - A lightweight SVG annotation library for computer vision and machine learning.</p>
                 <div class="buttons is-centered">
                     <a href="index.html" class="button is-text">Examples</a>
                     <a href="api.html" class="button is-text">API</a>
@@ -259,380 +244,186 @@ annotator.on('elementmoved', (data) => {
         </div>
     </footer>
 
-    <script defer>
-        let annotator = null;
-        let currentZoom = 1.0;
+    <script>
+        // The app owns the classes; MarkinJS only needs a colour per class_id.
+        const CLASSES = [
+            { id: 0, name: 'boat', color: '#2563eb' },
+            { id: 1, name: 'chair', color: '#16a34a' },
+            { id: 2, name: 'tyre', color: '#dc2626' },
+            { id: 3, name: 'building', color: '#d97706' }
+        ];
 
-        document.addEventListener('DOMContentLoaded', function () {
-            initializeDemo();
-            setupEventListeners();
-            setupTabs();
+        // Image pixels of assets/images/image.jpg (1280 x 853).
+        const SAMPLE = [
+            {
+                id: 'boat',
+                class_id: 0,
+                bbox: [557, 545, 302, 96],
+                segments: [[560, 606], [574, 582], [846, 546], [857, 550], [851, 636], [563, 638]]
+            },
+            {
+                id: 'chair',
+                class_id: 1,
+                bbox: [1012, 618, 142, 228],
+                keypoints: [
+                    { name: 'back_left', point: [1037, 628], v: 2 },
+                    { name: 'back_right', point: [1140, 640], v: 2 },
+                    { name: 'seat_left', point: [1027, 716], v: 2 },
+                    { name: 'seat_right', point: [1136, 728], v: 1 }
+                ]
+            },
+            { id: 'tyre', class_id: 2, bbox: [143, 586, 112, 80] },
+            { id: 'church', class_id: 3, bbox: [652, 204, 96, 72] }
+        ];
+        const SKELETON = [
+            ['back_left', 'back_right'],
+            ['back_left', 'seat_left'],
+            ['back_right', 'seat_right'],
+            ['seat_left', 'seat_right']
+        ];
+
+        const $ = (id) => document.getElementById(id);
+
+        const editor = MarkinJS.create('demo-image', {
+            annotations: SAMPLE,
+            colors: Object.fromEntries(CLASSES.map((c) => [c.id, c.color])),
+            skeleton: SKELETON
         });
 
-        function initializeDemo() {
-            // Initialize MarkinJS annotator
-            annotator = MarkinJS.createImageAnnotator('demo-image', {
-                keyboardControls: true,
-                zoom: 1.0,
-                requireSelectionToDrag: true
-            });
+        // ---- events
 
-            if (annotator) {
-                // Setup annotator events
-                setupAnnotatorEvents();
-                logEvent('🚀 MarkinJS demo initialized successfully');
-                
-                // Create initial demo annotations
-                createInitialAnnotations();
-                
-                // Initialize history button states
-                setTimeout(() => updateHistoryButtons(), 100);
-            } else {
-                logEvent('❌ Failed to initialize MarkinJS annotator');
+        function log(message) {
+            const view = $('event-log');
+            const line = document.createElement('div');
+            line.textContent = `${new Date().toLocaleTimeString()}  ${message}`;
+            view.appendChild(line);
+            while (view.children.length > 60) view.removeChild(view.firstChild);
+            view.scrollTop = view.scrollHeight;
+        }
+
+        function showData() {
+            // Rounded for reading, with each list of numbers on one line.
+            $('data-view').textContent = JSON.stringify(editor.getAnnotations(), (key, value) =>
+                typeof value === 'number' ? Math.round(value * 10) / 10 : value, 2)
+                .replace(/\[[\s\d.,-]+\]/g, (numbers) => numbers.replace(/\s+/g, ' ').replace('[ ', '[').replace(' ]', ']'));
+            $('undo').disabled = !editor.canUndo();
+            $('redo').disabled = !editor.canRedo();
+        }
+
+        function showSelection() {
+            const selection = editor.getSelection();
+            $('class-select').disabled = !selection;
+            $('delete-selected').disabled = !selection;
+            if (!selection) {
+                $('selection-info').textContent = 'Nothing selected.';
+                return;
             }
+            const what = selection.part === 'keypoint'
+                ? `keypoint "${selection.annotation.keypoints[selection.index].name ?? selection.index}"`
+                : selection.part || 'whole annotation';
+            $('selection-info').textContent = `${what} of "${selection.id}"`;
+            $('class-select').value = String(selection.annotation.class_id ?? '');
         }
 
-        function setupAnnotatorEvents() {
-            annotator.on('select', (data) => {
-                logEvent(`✅ Selected: ${data.type} (${data.data?.class || 'no class'})`);
+        // In a real app this is where the annotations are saved.
+        editor.on('change', (annotations, info) => {
+            log(`change (${info.reason}): ${annotations.length} annotation(s), ids ${info.ids.join(', ')}`);
+            showData();
+            showSelection();
+        });
+        editor.on('select', (e) => {
+            log(`select: ${e.part || 'annotation'}${e.index === null ? '' : ` #${e.index}`} of "${e.id}"`);
+            showSelection();
+        });
+        editor.on('deselect', (e) => {
+            log(`deselect: "${e.id}"`);
+            showSelection();
+        });
+        editor.on('dragend', (e) => {
+            log(`dragend: ${e.handle || 'move'} on "${e.id}"${e.cancelled ? ' (cancelled)' : ''}`);
+        });
+        editor.on('canvasclick', (e) => {
+            log(`canvasclick at ${Math.round(e.position.x)}, ${Math.round(e.position.y)}`);
+        });
+
+        // ---- controls
+
+        const place = (width, height) => {
+            // A random spot that keeps the whole shape well inside the image.
+            const x = 60 + Math.random() * (1280 - width - 120);
+            const y = 60 + Math.random() * (853 - height - 120);
+            return [Math.round(x), Math.round(y)];
+        };
+
+        $('add-box').addEventListener('click', () => {
+            const [x, y] = place(200, 140);
+            editor.createAnnotation({ class_id: 0, bbox: [x, y, 200, 140] });
+        });
+        $('add-polygon').addEventListener('click', () => {
+            const [x, y] = place(240, 180);
+            editor.createAnnotation({
+                class_id: 2,
+                bbox: [x, y, 240, 180],
+                segments: [[x + 30, y + 30], [x + 210, y + 20], [x + 220, y + 150], [x + 120, y + 165], [x + 20, y + 140]]
             });
-
-            annotator.on('deselect', () => {
-                logEvent('❌ Deselected element');
-            });
-
-            annotator.on('annotationcreated', (data) => {
-                logEvent(`✨ Created: ${data.class || 'unnamed'} annotation`);
-                updateHistoryButtons(); // Update history buttons when new annotations are created
-            });
-
-            annotator.on('delete', (data) => {
-                logEvent(`🗑️ Deleted: ${data.role} element`);
-                updateHistoryButtons(); // Update history buttons when elements are deleted
-            });
-
-            annotator.on('elementmoved', (data) => {
-                const dx = Math.round(data.deltaX * 10) / 10;
-                const dy = Math.round(data.deltaY * 10) / 10;
-                if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
-                    logEvent(`📍 Moved: ${data.type} by (${dx}, ${dy})`);
-                }
-            });
-
-            // Listen for annotation modifications to update history buttons
-            annotator.on('annotationmodificationcomplete', () => {
-                updateHistoryButtons();
-            });
-        }
-
-        function setupEventListeners() {
-            // Basic controls
-            document.getElementById('create-bbox').addEventListener('click', createDemoBbox);
-            document.getElementById('create-keypoints').addEventListener('click', createDemoKeypoints);
-            document.getElementById('create-polygon').addEventListener('click', createDemoPolygon);
-            document.getElementById('create-simple-face').addEventListener('click', createSimpleFace);
-            
-            // Advanced controls
-            document.getElementById('create-complex').addEventListener('click', createDemoComplex);
-            document.getElementById('create-bound-elements').addEventListener('click', createBoundElements);
-            document.getElementById('create-unbound-elements').addEventListener('click', createUnboundElements);
-            document.getElementById('create-containment-demo').addEventListener('click', createContainmentDemo);
-            
-            // Management controls
-            document.getElementById('delete-selected').addEventListener('click', () => {
-                annotator.deleteSelectedElement();
-            });
-            document.getElementById('clear-all').addEventListener('click', clearAllAnnotations);
-
-            // Zoom control
-            document.getElementById('zoom-slider').addEventListener('input', (e) => {
-                const zoom = parseFloat(e.target.value);
-                currentZoom = zoom;
-                annotator.setZoom(zoom);
-                updateZoomDisplay();
-            });
-
-            // Keyboard controls
-            document.getElementById('enable-keyboard').addEventListener('click', () => {
-                annotator.enableKeyboardControls();
-                logEvent('⌨️ Keyboard controls enabled');
-            });
-
-            document.getElementById('disable-keyboard').addEventListener('click', () => {
-                annotator.disableKeyboardControls();
-                logEvent('⌨️ Keyboard controls disabled');
-            });
-
-            // History controls
-            document.getElementById('undo-btn').addEventListener('click', () => {
-                if (annotator.undo()) {
-                    logEvent('↩️ Undo performed');
-                    updateHistoryButtons();
-                } else {
-                    logEvent('❌ Nothing to undo');
-                }
-            });
-
-            document.getElementById('redo-btn').addEventListener('click', () => {
-                if (annotator.redo()) {
-                    logEvent('↪️ Redo performed');
-                    updateHistoryButtons();
-                } else {
-                    logEvent('❌ Nothing to redo');
-                }
-            });
-
-            document.getElementById('clear-history').addEventListener('click', () => {
-                if (confirm('Clear undo/redo history? This cannot be undone.')) {
-                    annotator.clearHistory();
-                    logEvent('🧹 History cleared');
-                    updateHistoryButtons();
-                }
-            });
-
-        }
-
-        function setupTabs() {
-            // Tab functionality removed as we no longer use tabs in this simplified version
-        }
-
-        function createInitialAnnotations() {
-            // Create a bounding box annotation
-            annotator.createAnnotation({
-                bbox: [120, 80, 250, 180],
-                class: "person",
-                fill: 'rgba(79, 70, 229, 0.2)',
-                stroke: '#4f46e5'
-            });
-
-            // Create keypoints annotation with face detection
-            annotator.createAnnotation({
-                bbox: [300, 100, 420, 200],
-                class: "face",
+        });
+        $('add-keypoints').addEventListener('click', () => {
+            const [x, y] = place(160, 220);
+            editor.createAnnotation({
+                class_id: 1,
+                bbox: [x, y, 160, 220],
                 keypoints: [
-                    { name: "left_eye", point: [330, 130] },
-                    { name: "right_eye", point: [390, 130] },
-                    { name: "nose", point: [360, 150] },
-                    { name: "mouth", point: [360, 175] }
-                ],
-                fill: 'rgba(34, 197, 94, 0.2)',
-                stroke: '#22c55e'
+                    { name: 'back_left', point: [x + 30, y + 20], v: 2 },
+                    { name: 'back_right', point: [x + 130, y + 20], v: 2 },
+                    { name: 'seat_left', point: [x + 25, y + 110], v: 2 },
+                    { name: 'seat_right', point: [x + 135, y + 110], v: 2 }
+                ]
             });
-
-            // Create segmentation annotation
-            annotator.createAnnotation({
-                bbox: [150, 220, 270, 320],
-                class: "object",
-                segmentation: [
-                    170, 240,
-                    250, 240,
-                    260, 260,
-                    250, 300,
-                    170, 300,
-                    160, 260
-                ],
-                fill: 'rgba(239, 68, 68, 0.2)',
-                stroke: '#ef4444'
-            });
-
-            logEvent('📋 Initial demo annotations created');
-        }
-
-        // Demo creation functions
-        function createDemoBbox() {
-            const x = Math.random() * 200 + 50;
-            const y = Math.random() * 150 + 50;
-            annotator.createAnnotation({
-                bbox: [x, y, x + 120, y + 80],
-                class: "demo-bbox",
-                fill: 'rgba(79, 70, 229, 0.2)',
-                stroke: '#4f46e5'
-            });
-        }
-
-        function createDemoKeypoints() {
-            const x = Math.random() * 200 + 200;
-            const y = Math.random() * 150 + 100;
-            annotator.createAnnotation({
-                bbox: [x, y, x + 100, y + 80],
-                class: "demo-keypoints",
+        });
+        $('add-points').addEventListener('click', () => {
+            const [x, y] = place(120, 60);
+            editor.createAnnotation({
+                class_id: 3,
                 keypoints: [
-                    { name: "point1", point: [x + 25, y + 30] },
-                    { name: "point2", point: [x + 50, y + 40] },
-                    { name: "point3", point: [x + 75, y + 50] }
-                ],
-                fill: 'rgba(16, 185, 129, 0.2)',
-                stroke: '#10b981'
+                    { name: 'left', point: [x, y + 30] },
+                    { name: 'right', point: [x + 120, y + 30] }
+                ]
             });
+        });
+
+        const classSelect = $('class-select');
+        for (const c of CLASSES) {
+            const option = document.createElement('option');
+            option.value = String(c.id);
+            option.textContent = c.name;
+            classSelect.appendChild(option);
         }
+        classSelect.addEventListener('change', () => {
+            const selection = editor.getSelection();
+            if (selection) editor.updateAnnotation(selection.id, { class_id: Number(classSelect.value) });
+        });
 
-        function createDemoPolygon() {
-            const cx = Math.random() * 200 + 300;
-            const cy = Math.random() * 150 + 150;
-            annotator.createAnnotation({
-                bbox: [cx - 60, cy - 40, cx + 60, cy + 40],
-                class: "demo-polygon",
-                segmentation: [
-                    cx - 50, cy - 30,
-                    cx + 50, cy - 30,
-                    cx + 40, cy + 30,
-                    cx - 40, cy + 30
-                ],
-                fill: 'rgba(239, 68, 68, 0.2)',
-                stroke: '#ef4444'
-            });
+        $('delete-selected').addEventListener('click', () => editor.deleteSelected());
+        $('undo').addEventListener('click', () => editor.undo());
+        $('redo').addEventListener('click', () => editor.redo());
+        $('clear').addEventListener('click', () => editor.clear());
+        $('reset').addEventListener('click', () => {
+            editor.load(SAMPLE);
+            log('load: sample annotations (starts a fresh undo history)');
+            showData();
+        });
+
+        for (const box of document.querySelectorAll('[data-option]')) {
+            box.addEventListener('change', () => editor.setOptions({ [box.dataset.option]: box.checked }));
         }
+        $('enabled').addEventListener('change', (event) => {
+            if (event.target.checked) editor.enable();
+            else editor.disable();
+        });
 
-        function createDemoComplex() {
-            const x = Math.random() * 150 + 250;
-            const y = Math.random() * 100 + 200;
-            annotator.createAnnotation({
-                bbox: [x, y, x + 120, y + 80],
-                class: "complex-demo",
-                segmentation: [x + 20, y + 20, x + 100, y + 20, x + 100, y + 60, x + 20, y + 60],
-                keypoints: [
-                    { name: "center", point: [x + 60, y + 40] },
-                    { name: "corner", point: [x + 100, y + 60] }
-                ],
-                bindElements: true,
-                containRules: ["keypoint", "polygon"],
-                fill: 'rgba(124, 58, 237, 0.2)',
-                stroke: '#7c3aed'
-            });
-        }
-
-        function clearAllAnnotations() {
-            if (confirm('Clear all annotations? This cannot be undone.')) {
-                const svg = annotator.getSVGElement();
-                const groups = svg.querySelectorAll('g[data-annotation-group]');
-                groups.forEach(group => group.remove());
-                logEvent('🧹 All annotations cleared');
-            }
-        }
-
-        // New demo functions for categorized controls
-        function createSimpleFace() {
-            const x = Math.random() * 200 + 100;
-            const y = Math.random() * 150 + 80;
-            annotator.createAnnotation({
-                bbox: [x, y, x + 100, y + 120],
-                class: "face",
-                keypoints: [
-                    { name: "left_eye", point: [x + 25, y + 35] },
-                    { name: "right_eye", point: [x + 75, y + 35] },
-                    { name: "nose", point: [x + 50, y + 60] },
-                    { name: "mouth", point: [x + 50, y + 85] }
-                ],
-                fill: 'rgba(34, 197, 94, 0.2)',
-                stroke: '#22c55e'
-            });
-            logEvent('👤 Face detection annotation created');
-        }
-
-        function createBoundElements() {
-            const x = Math.random() * 200 + 150;
-            const y = Math.random() * 150 + 100;
-            annotator.createAnnotation({
-                bbox: [x, y, x + 120, y + 100],
-                class: "bound-example",
-                keypoints: [
-                    { name: "center", point: [x + 60, y + 50] },
-                    { name: "marker", point: [x + 90, y + 30] }
-                ],
-                segmentation: [x + 20, y + 20, x + 100, y + 20, x + 100, y + 80, x + 20, y + 80],
-                bindElements: true,
-                containRules: ["keypoint", "polygon"],
-                fill: 'rgba(59, 130, 246, 0.2)',
-                stroke: '#3b82f6'
-            });
-            logEvent('🔗 Bound elements annotation created - elements move together');
-        }
-
-        function createUnboundElements() {
-            const x = Math.random() * 200 + 250;
-            const y = Math.random() * 150 + 150;
-            annotator.createAnnotation({
-                bbox: [x, y, x + 100, y + 80],
-                class: "unbound-example",
-                keypoints: [
-                    { name: "free1", point: [x + 30, y + 30] },
-                    { name: "free2", point: [x + 70, y + 50] }
-                ],
-                bindElements: false,
-                fill: 'rgba(168, 85, 247, 0.2)',
-                stroke: '#a855f7'
-            });
-            logEvent('🔓 Unbound elements annotation created - elements move independently');
-        }
-
-        function createContainmentDemo() {
-            const x = Math.random() * 150 + 200;
-            const y = Math.random() * 100 + 200;
-            annotator.createAnnotation({
-                bbox: [x, y, x + 140, y + 100],
-                class: "containment-demo",
-                segmentation: [x + 20, y + 20, x + 120, y + 20, x + 120, y + 80, x + 20, y + 80],
-                keypoints: [
-                    { name: "contained1", point: [x + 40, y + 40] },
-                    { name: "contained2", point: [x + 100, y + 60] }
-                ],
-                bindElements: true,
-                containRules: ["polygon", "keypoint"],
-                fill: 'rgba(251, 146, 60, 0.2)',
-                stroke: '#fb923c'
-            });
-            logEvent('📦 Containment demo created - try moving elements outside the bounding box');
-        }
-
-
-        // Utility functions
-        function updateZoomDisplay() {
-            document.getElementById('zoom-display').textContent = currentZoom.toFixed(1) + 'x';
-        }
-
-        function updateHistoryButtons() {
-            if (annotator && annotator.history) {
-                const undoBtn = document.getElementById('undo-btn');
-                const redoBtn = document.getElementById('redo-btn');
-                
-                // Enable/disable undo button based on history availability
-                undoBtn.disabled = !annotator.history.hasUndo();
-                if (undoBtn.disabled) {
-                    undoBtn.classList.add('is-light');
-                    undoBtn.classList.remove('is-info');
-                } else {
-                    undoBtn.classList.remove('is-light');
-                    undoBtn.classList.add('is-info');
-                }
-                
-                // Enable/disable redo button based on history availability
-                redoBtn.disabled = !annotator.history.hasRedo();
-                if (redoBtn.disabled) {
-                    redoBtn.classList.add('is-light');
-                    redoBtn.classList.remove('is-info');
-                } else {
-                    redoBtn.classList.remove('is-light');
-                    redoBtn.classList.add('is-info');
-                }
-            }
-        }
-
-        function logEvent(message) {
-            const log = document.getElementById('event-log');
-            const timestamp = new Date().toLocaleTimeString();
-            const entry = document.createElement('div');
-            entry.textContent = `${timestamp}: ${message}`;
-            entry.style.marginBottom = '2px';
-            log.appendChild(entry);
-            log.scrollTop = log.scrollHeight;
-
-            // Keep only the most recent 50 entries
-            while (log.children.length > 50) {
-                log.removeChild(log.firstChild);
-            }
-        }
-
-        // Removed menu navigation as we simplified the layout
+        log('ready');
+        showData();
+        showSelection();
     </script>
 </body>
 
