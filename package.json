@@ -1,23 +1,27 @@
 {
   "name": "markinjs",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A lightweight, zero-dependency SVG annotation library for computer vision and image labeling projects",
   "main": "dist/markin.cjs.js",
-  "module": "dist/markin.esm.js",
-  "browser": "dist/markin.js",
-  "types": "dist/markin.d.ts",
+  "module": "dist/markin.esm.mjs",
+  "unpkg": "dist/markin.min.js",
+  "jsdelivr": "dist/markin.min.js",
+  "types": "markin.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/markin.d.ts",
-      "browser": "./dist/markin.js",
-      "import": "./dist/markin.esm.js",
+      "types": "./markin.d.ts",
+      "import": "./dist/markin.esm.mjs",
       "require": "./dist/markin.cjs.js",
-      "default": "./dist/markin.js"
-    }
+      "default": "./dist/markin.cjs.js"
+    },
+    "./dist/*": "./dist/*",
+    "./package.json": "./package.json"
   },
   "files": [
     "dist/",
+    "markin.d.ts",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {
@@ -25,11 +29,12 @@
     "build:watch": "rollup -c --watch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint markin.js",
-    "lint:fix": "eslint markin.js --fix",
-    "format": "prettier --write markin.js",
+    "lint": "eslint markin.js tests",
+    "lint:fix": "eslint markin.js tests --fix",
+    "format": "prettier --write markin.js tests",
     "example": "echo 'Open examples/index.html in your browser'",
-    "dev": "echo 'Open examples/index.html in your browser for development'"
+    "dev": "echo 'Open examples/index.html in your browser for development'",
+    "prepublishOnly": "npm run lint && npm test && npm run build"
   },
   "repository": {
     "type": "git",
@@ -54,7 +59,7 @@
   },
   "homepage": "https://markinjs.com",
   "engines": {
-    "node": ">=12.0.0"
+    "node": ">=18.0.0"
   },
   "browserslist": [
     "> 1%",
