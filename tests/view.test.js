@@ -649,6 +649,63 @@ describe('a stage the page marked', () => {
         near([middle.x, middle.y], [410, 310]);
     });
 
+    it('keeps the picture under the <svg> when the page moves it while the view is zoomed in', () => {
+        const { editor, viewport, stage, image, svg } = centred();
+        editor.zoomBy(2);
+        expect(image.style.transform).toBe('translate(-400px, -300px) scale(2)');
+        // The viewport grows to 1200 wide and the picture, which is centred in it, moves 100px along.
+        setBox(viewport, { left: 0, top: 0, width: 1200, height: 600 });
+        for (const el of [stage, image, svg]) setBox(el, { left: 200, top: 0, width: 800, height: 600 });
+        editor.refresh();
+        // The same point of the image is in the middle, and the picture is where the <svg> draws it.
+        expect(editor.toClient(400, 300).x).toBeCloseTo(600, 6);
+        near([image.getBoundingClientRect().left], [editor.toClient(0, 0).x]);
+    });
+
+    it('goes by where the <svg> lies in the stage, which may be larger than the picture', () => {
+        // A stage with 100px of its own under the picture, in a viewport of its size.
+        const { editor, image, svg } = makeStage({
+            viewport: { left: 0, top: 0, width: 800, height: 700 },
+            stage: { left: 0, top: 0, width: 800, height: 700 },
+            picture: { left: 0, top: 0, width: 800, height: 600 }
+        });
+        const agree = () => {
+            const corner = editor.toClient(0, 0);
+            const rect = image.getBoundingClientRect();
+            near([rect.left, rect.top], [corner.x, corner.y]);
+        };
+        editor.zoomBy(2);
+        expect(svg.getAttribute('viewBox')).toBe('200 175 400 350');
+        agree();
+        // And once more from there, when the <svg> is no longer where it lies at rest.
+        editor.zoomBy(2);
+        expect(svg.getAttribute('viewBox')).toBe('300 262.5 200 175');
+        agree();
+    });
+
+    it('has no view while the stage has no size, as when all that is in it is laid over it', () => {
+        const box = { left: 0, top: 0, width: 800, height: 600 };
+        const { editor, image, svg } = makeStage({ viewport: box, picture: box, stage: { ...box, height: 0 } });
+        expect(editor.getView()).toBe(null);
+        expect(editor.zoomBy(2)).toBe(false);
+        expect([image.style.transform, svg.getAttribute('viewBox')]).toEqual(['', '0 0 800 600']);
+    });
+
+    it('gives back what the page had when the view left rest, and leaves it alone at rest', () => {
+        const { editor, image, svg, viewport } = centred();
+        const page = () => [image.style.transform, viewport.style.overflow, svg.style.width];
+        // Styles the page sets while the editor lives and the view is at rest.
+        image.style.transform = 'rotate(0deg)';
+        viewport.style.overflow = 'auto';
+        svg.style.width = '100%';
+        editor.refresh();
+        expect(page()).toEqual(['rotate(0deg)', 'auto', '100%']);
+        editor.zoomBy(2);
+        expect(page()).toEqual(['translate(-400px, -300px) scale(2)', 'hidden', '1000px']);
+        editor.fit();
+        expect(page()).toEqual(['rotate(0deg)', 'auto', '100%']);
+    });
+
     it('gives the page its own styles and attributes back', () => {
         const { editor, image, svg, viewport } = centred((v, s, picture) => {
             picture.style.transform = 'rotate(0deg)';

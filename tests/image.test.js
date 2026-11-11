@@ -9,6 +9,7 @@ import {
     stageOf,
     drag,
     bboxEl,
+    nextFrame,
     BOX,
     SVG_NS
 } from './setup.js';
@@ -383,11 +384,14 @@ describe('an editor on an <svg>', () => {
         expect(first.getView()).toBe(null);
     });
 
-    it('takes another viewBox that the page puts on a zoomed <svg> as another picture', () => {
+    it('takes another viewBox that the page puts on a zoomed <svg> as another picture', async () => {
         const { svg } = page('<svg viewBox="0 0 800 600" preserveAspectRatio="xMaxYMax"></svg>');
         setBox(svg, { left: 0, top: 0, width: 800, height: 600 });
         const { editor } = makeEditor({ annotations: [BOX] }, svg);
+        const seen = [];
+        editor.on('viewchange', (view) => seen.push(view.width));
         editor.zoomBy(4);
+        await nextFrame();
         // The page shows its next image, as it did before there was zoom.
         svg.setAttribute('viewBox', '0 0 1600 1200');
         expect(editor.getView()).toEqual({ x: 0, y: 0, width: 1600, height: 1200, scale: 0.5 });
@@ -396,7 +400,36 @@ describe('an editor on an <svg>', () => {
             'xMaxYMax'
         ]);
         expect(svg.style.overflow).toBe('');
+        // The host hears of it, as of any other view.
+        await nextFrame();
+        expect(seen).toEqual([200, 1600]);
         editor.zoomBy(2);
         expect(editor.getView()).toEqual({ x: 400, y: 300, width: 800, height: 600, scale: 1 });
+    });
+
+    it('measures by the new picture at once: what must stay inside it, and what normalize divides by', () => {
+        const bigger = () => {
+            const made = makeEditor({ annotations: [{ id: 'a', bbox: [400, 300, 400, 300] }] });
+            made.editor.zoomBy(4);
+            made.svg.setAttribute('viewBox', '0 0 1600 1200');
+            return made;
+        };
+        // The first thing a page does with its next image is to load what belongs to it.
+        const loading = bigger();
+        loading.editor.load([{ id: 'far', bbox: [1000, 800, 400, 200] }]);
+        expect(loading.log).toEqual([]);
+
+        const { editor } = bigger();
+        expect(editor.getAnnotations({ normalize: true })[0].bbox).toEqual([0.25, 0.25, 0.25, 0.25]);
+    });
+
+    it('leaves the page a viewBox it set while the view was zoomed in, also when the editor goes then', () => {
+        const { editor, svg } = makeEditor();
+        editor.zoomBy(4);
+        svg.setAttribute('viewBox', '0 0 1600 1200');
+        editor.destroy();
+        expect(svg.getAttribute('viewBox')).toBe('0 0 1600 1200');
+        expect(svg.hasAttribute('preserveAspectRatio')).toBe(false);
+        expect(svg.style.overflow).toBe('');
     });
 });

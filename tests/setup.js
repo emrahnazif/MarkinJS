@@ -168,8 +168,17 @@ export function makeImage({ width = 1280, height = 853 } = {}) {
 
 // The page's own markup around an <svg>: a <section>, which is the viewport, holding a stage the
 // page marked, and whatever `extra` the page puts next to it. In the stage are the picture, an
-// <img>, and the <svg> over it. `viewport` and `picture` are their boxes on screen.
-export function makeStage({ viewBox = '0 0 800 600', viewport, picture, extra = '', prepare, options } = {}) {
+// <img>, and the <svg> over it. `viewport`, `stage` and `picture` are their boxes on screen; the
+// stage is as large as the picture unless it is given a box of its own.
+export function makeStage({
+    viewBox = '0 0 800 600',
+    viewport,
+    picture,
+    stage: around = picture,
+    extra = '',
+    prepare,
+    options
+} = {}) {
     const section = document.createElement('section');
     section.innerHTML = `<div data-markin-stage><img alt=""><svg viewBox="${viewBox}"></svg></div>${extra}`;
     const stage = section.firstChild;
@@ -177,7 +186,8 @@ export function makeStage({ viewBox = '0 0 800 600', viewport, picture, extra = 
     if (prepare) prepare(section, stage, image);
     document.body.appendChild(section);
     setBox(section, viewport);
-    for (const el of [stage, image, svg]) setBox(el, picture);
+    setBox(stage, around);
+    for (const el of [image, svg]) setBox(el, picture);
     const editor = track(MarkinJS.create(svg, { silent: true, ...options }));
     return { editor, viewport: section, stage, image, svg };
 }

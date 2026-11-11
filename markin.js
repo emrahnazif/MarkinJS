@@ -370,6 +370,20 @@ const MarkinJS = (function () {
     // Some inline styles of an element as they are now, to be put back later with Object.assign.
     const inlineOf = (el, names) => Object.fromEntries(names.map((name) => [name, el.style[name]]));
 
+    // A box as the part it is of the box `whole` around it, and such a part as a box again.
+    const partOf = (b, whole) => ({
+        x: (b.x - whole.x) / whole.w,
+        y: (b.y - whole.y) / whole.h,
+        w: b.w / whole.w,
+        h: b.h / whole.h
+    });
+    const partIn = (part, whole) => ({
+        x: whole.x + part.x * whole.w,
+        y: whole.y + part.y * whole.h,
+        w: part.w * whole.w,
+        h: part.h * whole.h
+    });
+
     // How an <svg> fits its viewBox into its box, from its preserveAspectRatio: where the spare room
     // goes (0, 0.5 or 1 on each axis) and whether it fills the box instead (`slice`). Null for
     // "none", which stretches.
@@ -632,6 +646,9 @@ const MarkinJS = (function () {
         return { viewport, stage };
     }
 
+    // An image that has not arrived yet: there is nothing to draw on.
+    const NO_PICTURE = { viewBox: null, aspect: 'none', box: null };
+
     // Wrap an <img> in a viewport and a stage, and lay an <svg> exactly over the drawn image.
     // The SVG's viewBox is the image's natural size, so annotations are in image pixels.
     function mountOverImage(image, onChange, note) {
@@ -670,10 +687,12 @@ const MarkinJS = (function () {
         svg.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;overflow:visible';
         stage.appendChild(svg);
 
-        // What the editor draws from: the picture's own size, where the overlay goes with the view
-        // at rest (as styles, and as numbers where the image could be measured), and the picture
-        // element itself, which is what a zoomed view moves and scales.
-        const host = { image, viewport: container, stage, svg, pictures: [image], natural: null, drawn: null };
+        // What the editor draws from: the picture as an <svg> of the page's own would state it
+        // (`home`: a viewBox of the image's own size, stretched over where the image is drawn),
+        // where the overlay goes with the view at rest (as styles, and as numbers where the image
+        // could be measured), and the picture element itself, which is what a zoomed view moves
+        // and scales.
+        const host = { image, viewport: container, stage, svg, pictures: [image], home: NO_PICTURE, drawn: null };
         let shown = null; // the picture last seen: its address and size
         const sync = () => {
             const nw = image.naturalWidth;
@@ -684,7 +703,9 @@ const MarkinJS = (function () {
             const picture = loaded ? `${image.currentSrc || image.src} ${nw} ${nh}` : shown;
             const fresh = shown !== null && picture !== shown;
             shown = picture;
-            host.natural = loaded ? { w: nw, h: nh } : null;
+            host.home = loaded
+                ? { viewBox: `0 0 ${nw} ${nh}`, aspect: 'none', box: { x: 0, y: 0, w: nw, h: nh } }
+                : NO_PICTURE;
             svg.style.visibility = loaded ? '' : 'hidden';
 
             const style = styleOf(image);
@@ -739,7 +760,7 @@ const MarkinJS = (function () {
         return host;
     }
 
-    // What an editor on the page's own <svg> zooms in, or null when it cannot zoom.
+    // What an editor on the page's own <svg> zooms in. Without a viewport it cannot zoom.
     //
     // An <svg> that holds the whole picture is its own viewport: only its viewBox changes. An <svg>
     // laid over a picture the page owns says so by an ancestor marked `data-markin-stage`: that
@@ -751,16 +772,16 @@ const MarkinJS = (function () {
         if (marked && marked.parentElement) {
             // Everything in the stage but the <svg> is the picture.
             const pictures = Array.from(marked.children).filter((el) => !el.contains(svg));
-            return { viewport: marked.parentElement, stage: marked, pictures, teardown() {} };
+            return { viewport: marked.parentElement, stage: marked, pictures };
         }
         const style = styleOf(svg);
         if (style && /^(absolute|fixed|sticky)$/.test(style.position || '')) {
             note(
                 'zoom and pan are off: the <svg> is laid over other content, which would not follow it. Mark the element that holds both with data-markin-stage (see the README).'
             );
-            return null;
+            return { viewport: null, stage: null, pictures: [] };
         }
-        return { viewport: svg, stage: null, pictures: [], teardown() {} };
+        return { viewport: svg, stage: null, pictures: [] };
     }
 
     // What is listened for on the viewport, and what hears it. The wheel and the pinch are kept
@@ -808,32 +829,22 @@ const MarkinJS = (function () {
             const warn = (message) => this._log('warn', message);
             this.host =
                 target.localName === 'img'
-                    ? mountOverImage(
-                          target,
-                          (fresh) => {
-                              if (fresh) this._resetView();
-                              this.refresh();
-                          },
-                          warn
-                      )
+                    ? mountOverImage(target, (fresh) => (fresh ? this._newPicture() : this.refresh()), warn)
                     : null;
             this.svg = this.host ? this.host.svg : target;
             // What zoom and pan work on: the viewport that clips, the stage that holds the picture
             // and the <svg> (when they are two things), and the picture elements themselves. An
             // <svg> that cannot zoom works as before; only a host that wants zoom is told.
-            this.frame = this.host || frameOfSvg(target, (message) => this.opts.zoomControls && warn(message));
-            this.viewport = this.frame ? this.frame.viewport : null;
-            this.stage = this.frame ? this.frame.stage : null;
-            this.pictures = this.frame ? this.frame.pictures : [];
-            // What the page itself had written on all of these, which is what they go back to when
-            // the view is at rest and when the editor is destroyed.
-            this.rest = this.frame
+            const frame = this.host || frameOfSvg(target, (message) => this.opts.zoomControls && warn(message));
+            this.viewport = frame.viewport;
+            this.stage = frame.stage;
+            this.pictures = frame.pictures;
+            // What the editor borrows from the page for as long as it lives, and gives back when
+            // it is destroyed.
+            this.rest = this.viewport
                 ? {
                       cursor: this.viewport.style.cursor,
-                      overflow: this.viewport.style.overflow,
-                      stage: this.stage ? inlineOf(this.stage, ['userSelect', 'webkitUserSelect']) : null,
-                      svg: inlineOf(this.svg, ['left', 'top', 'width', 'height', 'overflow', 'clipPath']),
-                      pictures: this.pictures.map((el) => inlineOf(el, ['transform', 'transformOrigin']))
+                      stage: this.stage ? inlineOf(this.stage, ['userSelect', 'webkitUserSelect']) : null
                   }
                 : null;
             // The page's own elements that had no style attribute, to leave them without one again.
@@ -856,8 +867,9 @@ const MarkinJS = (function () {
             // The view: what lies at X in the viewport at rest is shown at x + scale * X.
             this.view = { scale: 1, x: 0, y: 0 };
             this.middle = null; // the image point in the middle of a zoomed view, to keep it there
-            this.home = null; // the viewBox and preserveAspectRatio of the page's own <svg> at rest
-            this.wrote = null; // the viewBox written for a zoomed view
+            // What the page had where a zoomed view is written, and what was written there. Null
+            // while the view is at rest: the page is then as the page has it.
+            this.away = null;
             this.viewFrame = 0;
             this.viewKey = null; // what `viewchange` last reported
             this.settleTimer = 0;
@@ -877,7 +889,6 @@ const MarkinJS = (function () {
             this._build();
             try {
                 if (this.host) this.host.sync();
-                else this._home();
                 this._measure();
                 this._renderAll();
                 if (initial) this.load(initial);
@@ -920,8 +931,6 @@ const MarkinJS = (function () {
             if (vp) {
                 this.cleanup.push(weakListen(vp, 'pointerleave', this, '_onOutside'));
                 for (const type of Object.keys(VIEWPORT_EVENTS)) {
-                    // An <svg> that is its own viewport hears its presses already.
-                    if (vp === svg && type === 'pointerdown') continue;
                     this.cleanup.push(weakListen(vp, type, this, '_onViewport'));
                 }
             }
@@ -1003,14 +1012,13 @@ const MarkinJS = (function () {
             for (const layer of [this.shapesLayer, this.pointsLayer, this.uiLayer]) layer.textContent = '';
             if (registry.get(this.target) === this) registry.delete(this.target);
             this.svg.style.touchAction = this.savedTouchAction;
-            if (this.frame) {
+            if (this.viewport) {
                 // The page gets back what it had: the <svg> and the picture as at rest, and its styles.
-                this.view = { scale: 1, x: 0, y: 0 };
-                this._writeView(null);
+                this._resetView();
                 this.viewport.style.cursor = this.rest.cursor;
                 if (this.stage) Object.assign(this.stage.style, this.rest.stage);
-                this.frame.teardown();
             }
+            if (this.host) this.host.teardown();
             for (const el of this.bare) if (el.getAttribute('style') === '') el.removeAttribute('style');
             this.list = [];
             this.byId.clear();
@@ -1101,32 +1109,32 @@ const MarkinJS = (function () {
             return box && box.width > 0 && box.height > 0 ? { x: box.x, y: box.y, w: box.width, h: box.height } : null;
         }
 
-        // The <svg> as it is with the view at rest: its viewBox, which is the image, and how that is
-        // fitted into its box. Zoomed in, the attributes hold what is visible instead, so what they
-        // were is remembered. `box` is the viewBox in numbers, or null when there is none.
+        // The picture with the view at rest: the viewBox of the <svg>, which is the image, and how
+        // that is fitted into its box. `box` is the viewBox in numbers, or null when there is none.
+        // Zoomed in, the attributes hold what is visible instead, and what they were is kept.
         _home() {
+            if (this.host) return this.host.home;
+            if (this.away) return this.away.home;
             const svg = this.svg;
-            if (this.host) {
-                const n = this.host.natural;
-                const box = n ? { x: 0, y: 0, w: n.w, h: n.h } : null;
-                return { viewBox: n ? `0 0 ${n.w} ${n.h}` : null, aspect: 'none', box };
-            }
-            // `wrote` is the viewBox that was put on the <svg> for a zoomed view, and null while the
-            // <svg> is as the page has it. Another one there means the page replaced it while the
-            // view was zoomed in: that is another picture, and it starts at rest.
-            if (this.wrote !== null && svg.getAttribute('viewBox') !== this.wrote) {
-                this.wrote = null;
-                setAttrs(svg, { preserveAspectRatio: this.home.aspect });
-                this._resetView();
-            }
-            if (this.wrote === null) {
-                this.home = {
-                    viewBox: svg.getAttribute('viewBox'),
-                    aspect: svg.getAttribute('preserveAspectRatio'),
-                    box: this._viewBox()
-                };
-            }
-            return this.home;
+            return {
+                viewBox: svg.getAttribute('viewBox'),
+                aspect: svg.getAttribute('preserveAspectRatio'),
+                box: this._viewBox()
+            };
+        }
+
+        // The page may put another viewBox on its own <svg> while the view is zoomed in. That is
+        // another picture, as another file in an <img> is. Whatever asks about the picture looks
+        // for one first.
+        _follow() {
+            const away = this.away;
+            if (away && !this.host && this.svg.getAttribute('viewBox') !== away.viewBox) this._newPicture();
+        }
+
+        // Another picture in the same place starts at rest.
+        _newPicture() {
+            this._resetView();
+            this.refresh();
         }
 
         _atRest() {
@@ -1136,6 +1144,7 @@ const MarkinJS = (function () {
 
         // The area annotations must stay inside.
         _bounds() {
+            this._follow();
             const vb = this.opts.constrainToImage ? this._home().box : null;
             return vb ? { x1: vb.x, y1: vb.y, x2: vb.x + vb.w, y2: vb.y + vb.h } : NO_LIMIT;
         }
@@ -1204,9 +1213,11 @@ const MarkinJS = (function () {
         }
 
         // Re-read how many SVG units one screen pixel covers. True when it changed noticeably.
-        _measure(m = this._matrix()) {
+        // `m` is the matrix, when the caller has it already, and `zoom` how many times larger than
+        // under that matrix the picture is about to be shown.
+        _measure(m = this._matrix(), zoom = 1) {
             if (!m) return false;
-            const scale = scaleOf(m);
+            const scale = scaleOf(m) * zoom;
             if (!(scale > 0) || !Number.isFinite(scale)) return false;
             const unit = 1 / scale;
             if (Math.abs(unit - this.unit) <= this.unit * 0.005) return false;
@@ -1215,8 +1226,8 @@ const MarkinJS = (function () {
         }
 
         // Handles and outlines take the size the canvas now has on screen.
-        _remeasure(m) {
-            if (!this.dead && this._measure(m)) this._rescale();
+        _remeasure(m, zoom) {
+            if (!this.dead && this._measure(m, zoom)) this._rescale();
         }
 
         _onResize() {
@@ -1227,13 +1238,14 @@ const MarkinJS = (function () {
         // The canvas changed size or place on the page: measure it again.
         refresh() {
             if (this.dead) return;
-            // The page may lay the picture out differently now. At rest that is all there is to follow.
-            if (this.viewport && this._atRest()) this._writeView(null);
+            // Over an image the <svg> follows the image, which the page may lay out differently
+            // now. At rest that is all there is to follow; an <svg> of the page's own is the page's.
+            if (this.host && this._atRest()) this._writeView(null);
             const g = this._geometry();
             if (g && !this._atRest()) {
                 // A view that is zoomed in keeps the same point of the image in its middle, as far as
                 // the limits allow, which may be other ones now.
-                const p = this._resting(g, this.middle.x, this.middle.y);
+                const p = map(g.rest, this.middle.x, this.middle.y);
                 if (!this._place(this.view.scale, p.x, p.y, g.width / 2, g.height / 2, g)) this._writeView(g);
             }
             this._remeasure();
@@ -1252,6 +1264,7 @@ const MarkinJS = (function () {
         // page is not laid out. Lengths are layout pixels of the viewport unless they say otherwise.
         _geometry() {
             if (this.dead || !this.viewport) return null;
+            this._follow();
             const home = this._home();
             // An image that has not arrived yet has no size to speak of.
             if (this.host && !home.box) return null;
@@ -1263,9 +1276,11 @@ const MarkinJS = (function () {
             let top = own.y;
             let width = own.w;
             let height = own.h;
-            // Where the <svg> lies with the view at rest, in viewport pixels.
+            // Where the <svg> lies with the view at rest, in viewport pixels, and which part of
+            // the stage that is.
             let lie = { x: 0, y: 0, w: width, h: height };
-            let stageAt = null;
+            let whole = null; // the stage
+            let within = null;
             if (this.stage) {
                 const vp = this.viewport;
                 const box = vp.getBoundingClientRect();
@@ -1281,35 +1296,53 @@ const MarkinJS = (function () {
                 top = box.top + (vp.clientTop || 0) * ky;
                 width = box.width / kx - (vp.offsetWidth > 0 ? vp.offsetWidth - vp.clientWidth : 0);
                 height = box.height / ky - (vp.offsetHeight > 0 ? vp.offsetHeight - vp.clientHeight : 0);
-                // The stage is never moved: it is where the page laid the picture out. The <svg>
-                // lies over the image as drawn in it, or else over all of it.
+                // The stage is never moved: it is where the page laid the picture out.
                 const stage = this.stage.getBoundingClientRect();
-                stageAt = [(stage.left - left) / kx, (stage.top - top) / ky];
+                if (!(stage.width > 0 && stage.height > 0)) return null;
+                whole = {
+                    x: (stage.left - left) / kx,
+                    y: (stage.top - top) / ky,
+                    w: stage.width / kx,
+                    h: stage.height / ky
+                };
+                // At rest the <svg> lies where it is. Zoomed in it covers the viewport instead,
+                // and its place at rest is the image as drawn, which the mount keeps measured,
+                // or else the part of the stage it had when the view left rest.
                 const drawn = this.host && this.host.drawn;
-                lie = drawn
-                    ? { x: stageAt[0] + drawn.x, y: stageAt[1] + drawn.y, w: drawn.w, h: drawn.h }
-                    : { x: stageAt[0], y: stageAt[1], w: stage.width / kx, h: stage.height / ky };
+                if (!this.away) {
+                    lie = {
+                        x: (own.x - left) / kx,
+                        y: (own.y - top) / ky,
+                        w: (own.w * own.kx) / kx,
+                        h: (own.h * own.ky) / ky
+                    };
+                } else if (drawn) {
+                    lie = { x: whole.x + drawn.x, y: whole.y + drawn.y, w: drawn.w, h: drawn.h };
+                } else {
+                    lie = partIn(this.away.within, whole);
+                }
+                within = this.away ? this.away.within : partOf(lie, whole);
             }
             // An <svg> without a viewBox is its own picture, one unit to the layout pixel.
             const image = home.box || { x: 0, y: 0, w: lie.w, h: lie.h };
             const fit = fitted(image, home.box ? aspectOf(home.aspect) : null, lie.w, lie.h);
-            // With the view at rest, the image point q lies at R + r * q in the viewport ...
-            const rx = fit.sx;
-            const ry = fit.sy;
-            const Rx = lie.x + fit.ox;
-            const Ry = lie.y + fit.oy;
-            // ... and the view shows it at x + scale * (R + r * q). The same as a matrix to the screen:
+            // With the view at rest, the image point q lies at rest(q) in the viewport ...
+            const rest = { a: fit.sx, b: 0, c: 0, d: fit.sy, e: lie.x + fit.ox, f: lie.y + fit.oy };
+            // ... and the view shows it at x + scale * rest(q). The same as a matrix to the screen:
             const v = this.view;
             const m = {
-                a: kx * v.scale * rx,
+                a: kx * v.scale * rest.a,
                 b: 0,
                 c: 0,
-                d: ky * v.scale * ry,
-                e: left + kx * (v.x + v.scale * Rx),
-                f: top + ky * (v.y + v.scale * Ry)
+                d: ky * v.scale * rest.d,
+                e: left + kx * (v.x + v.scale * rest.e),
+                f: top + ky * (v.y + v.scale * rest.f)
             };
-            // Screen pixels per image pixel with the view at rest.
-            const base = Math.sqrt(rx * ry * kx * ky);
+            // Screen pixels per image pixel now, and with the view at rest.
+            const scale = scaleOf(m);
+            const base = scale / v.scale;
+            const from = map(rest, image.x, image.y);
+            const to = map(rest, image.x + image.w, image.y + image.h);
             return {
                 m,
                 kx,
@@ -1318,31 +1351,20 @@ const MarkinJS = (function () {
                 top,
                 width,
                 height,
-                rx,
-                ry,
-                Rx,
-                Ry,
+                rest,
                 // The picture at rest, in viewport pixels.
-                x1: Rx + rx * image.x,
-                x2: Rx + rx * (image.x + image.w),
-                y1: Ry + ry * image.y,
-                y2: Ry + ry * (image.y + image.h),
+                x1: from.x,
+                x2: to.x,
+                y1: from.y,
+                y2: to.y,
                 image,
-                scale: base * v.scale,
+                home,
+                scale,
                 // Zoomed out, the limit is the picture as the page lays it out, however large that is.
                 maxScale: Math.max(1, this.opts.maxScale / base),
-                stageAt,
-                // Where each picture element starts at rest. What is on the page now is the view.
-                pictures: this.pictures.map((el) => {
-                    const r = el.getBoundingClientRect();
-                    return [((r.left - left) / kx - v.x) / v.scale, ((r.top - top) / ky - v.y) / v.scale];
-                })
+                stage: whole,
+                within
             };
-        }
-
-        // Where an image point lies in the viewport with the view at rest.
-        _resting(g, x, y) {
-            return { x: g.Rx + g.rx * x, y: g.Ry + g.ry * y };
         }
 
         // The image points at the top left and the bottom right of the viewport.
@@ -1357,15 +1379,16 @@ const MarkinJS = (function () {
             const next = limitView(scale, x, y, g, slack);
             const v = this.view;
             if (next.scale === v.scale && next.x === v.x && next.y === v.y) return false;
+            // Handles and outlines follow a zoom in the same frame: they are measured by the matrix,
+            // which is larger by as much as the view is. It is read before the page is written;
+            // asked for afterwards, the browser would lay the page out a second time for it.
+            // Moving the view changes no size.
+            const before = next.scale !== v.scale ? this._matrix() : null;
             this.view = next;
             // The image point in the middle: where a resized canvas picks the view up again.
-            this.middle = {
-                x: ((g.width / 2 - next.x) / next.scale - g.Rx) / g.rx,
-                y: ((g.height / 2 - next.y) / next.scale - g.Ry) / g.ry
-            };
+            this.middle = unmap(g.rest, (g.width / 2 - next.x) / next.scale, (g.height / 2 - next.y) / next.scale);
             this._writeView(g);
-            // Handles and outlines follow a zoom in the same frame. Moving the view changes no size.
-            if (next.scale !== v.scale) this._remeasure();
+            if (before) this._remeasure(before, next.scale / v.scale);
             this._viewChanged();
             return true;
         }
@@ -1388,52 +1411,70 @@ const MarkinJS = (function () {
         _writeView(g) {
             const svg = this.svg;
             const { scale: s, x, y } = this.view;
-            const rest = this._atRest();
-            // Asked for while the page still shows the view before this one.
-            const home = this._home();
-            if (rest) {
-                this.wrote = null;
-                setAttrs(svg, { viewBox: home.viewBox, preserveAspectRatio: home.aspect });
-            } else {
-                // What the viewport shows of the image, stretched over all of the <svg>.
-                const box = [
-                    (-x / s - g.Rx) / g.rx,
-                    (-y / s - g.Ry) / g.ry,
-                    g.width / (s * g.rx),
-                    g.height / (s * g.ry)
-                ];
-                this.wrote = box.map((n) => rounded(n, 9)).join(' ');
-                setAttrs(svg, { viewBox: this.wrote, preserveAspectRatio: 'none' });
-            }
-            if (this.stage) {
-                // Zoomed in, the <svg> covers the viewport, which clips the picture under it. At rest
-                // it lies over the picture and nothing is clipped, so a handle on the edge is whole.
-                const lie = this.host ? { ...this.host.place, overflow: 'visible' } : this.rest.svg;
-                const cover = rest
-                    ? lie
-                    : {
-                          left: `${rounded(-g.stageAt[0], 3)}px`,
-                          top: `${rounded(-g.stageAt[1], 3)}px`,
-                          width: `${rounded(g.width, 3)}px`,
-                          height: `${rounded(g.height, 3)}px`,
-                          overflow: 'hidden',
-                          clipPath: ''
-                      };
-                Object.assign(svg.style, cover);
-                this.viewport.style.overflow = rest ? this.rest.overflow : 'hidden';
-            } else {
-                // On its own the <svg> is the window, and must clip like one.
-                svg.style.overflow = rest ? this.rest.svg.overflow : 'hidden';
-            }
-            // The picture is moved and scaled about its own corner to where the view shows it.
-            this.pictures.forEach((el, i) => {
-                if (rest) {
-                    Object.assign(el.style, this.rest.pictures[i]);
-                } else {
-                    const [dx, dy] = g.pictures[i];
-                    el.style.transformOrigin = '0 0';
-                    el.style.transform = `translate(${rounded(x + (s - 1) * dx, 3)}px, ${rounded(y + (s - 1) * dy, 3)}px) scale(${s})`;
+            if (this._atRest()) {
+                const away = this.away;
+                if (away) {
+                    // The page gets back what it had when the view left rest. A viewBox it has put
+                    // there since is its own.
+                    this.away = null;
+                    if (svg.getAttribute('viewBox') === away.viewBox) setAttrs(svg, { viewBox: away.home.viewBox });
+                    setAttrs(svg, { preserveAspectRatio: away.home.aspect });
+                    if (away.svg) Object.assign(svg.style, away.svg);
+                    this.viewport.style.overflow = away.overflow;
+                    this.pictures.forEach((el, i) => Object.assign(el.style, away.pictures[i]));
                 }
+                if (this.host) {
+                    // Over an image the <svg> goes where the image is drawn now.
+                    const home = this.host.home;
+                    setAttrs(svg, { viewBox: home.viewBox, preserveAspectRatio: home.aspect });
+                    Object.assign(svg.style, this.host.place);
+                }
+                return;
+            }
+            if (!this.away) {
+                // Leaving rest: what the page has where the view is about to be written.
+                this.away = {
+                    home: g.home,
+                    within: g.within,
+                    // Which part of the stage each picture takes. That is how its place at rest is
+                    // known from here on: the stage is never moved, while a picture that has been
+                    // moved far and scaled up cannot be measured closely enough.
+                    parts: this.pictures.map((el) => {
+                        const r = el.getBoundingClientRect();
+                        const at = { x: (r.left - g.left) / g.kx, y: (r.top - g.top) / g.ky };
+                        return partOf({ ...at, w: r.width / g.kx, h: r.height / g.ky }, g.stage);
+                    }),
+                    svg: this.stage ? inlineOf(svg, ['left', 'top', 'width', 'height', 'overflow', 'clipPath']) : null,
+                    overflow: this.viewport.style.overflow,
+                    pictures: this.pictures.map((el) => inlineOf(el, ['transform', 'transformOrigin'])),
+                    viewBox: null // the one written for the view
+                };
+            }
+            const away = this.away;
+            // What the viewport shows of the image, stretched over all of the <svg>.
+            const corner = unmap(g.rest, -x / s, -y / s);
+            const box = [corner.x, corner.y, g.width / (s * g.rest.a), g.height / (s * g.rest.d)];
+            away.viewBox = box.map((n) => rounded(n, 9)).join(' ');
+            setAttrs(svg, { viewBox: away.viewBox, preserveAspectRatio: 'none' });
+            const px = (n) => `${rounded(n, 3)}px`;
+            if (this.stage) {
+                // Over a picture the <svg> covers the viewport, which clips the picture under it.
+                Object.assign(svg.style, {
+                    left: px(-g.stage.x),
+                    top: px(-g.stage.y),
+                    width: px(g.width),
+                    height: px(g.height),
+                    overflow: 'hidden',
+                    clipPath: ''
+                });
+            }
+            // On its own the <svg> is the viewport, and clips like one.
+            this.viewport.style.overflow = 'hidden';
+            // Each picture is moved and scaled about its own corner to where the view shows it.
+            this.pictures.forEach((el, i) => {
+                const at = partIn(away.parts[i], g.stage);
+                el.style.transformOrigin = '0 0';
+                el.style.transform = `translate(${px(x + (s - 1) * at.x)}, ${px(y + (s - 1) * at.y)}) scale(${s})`;
             });
         }
 
@@ -1502,8 +1543,9 @@ const MarkinJS = (function () {
         _show(x1, y1, x2, y2, pad) {
             const g = this._geometry();
             if (!g) return false;
-            const a = this._resting(g, x1, y1);
-            const b = this._resting(g, x2, y2);
+            // Where the two corners lie in the viewport with the view at rest.
+            const a = map(g.rest, x1, y1);
+            const b = map(g.rest, x2, y2);
             const roomX = Math.max(g.width - (2 * pad) / g.kx, 1);
             const roomY = Math.max(g.height - (2 * pad) / g.ky, 1);
             // A rectangle without a size, a single keypoint, is shown as close as the view goes.
@@ -2071,6 +2113,7 @@ const MarkinJS = (function () {
         getAnnotations(settings) {
             if (this.dead) return [];
             if (isObject(settings) && settings.normalize) {
+                this._follow();
                 const vb = this._home().box;
                 if (!vb) {
                     this._problem('getAnnotations: cannot normalize, the image size is not known yet');
