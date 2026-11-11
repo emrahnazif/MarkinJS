@@ -7,6 +7,7 @@ This directory contains various examples showcasing MarkinJS's capabilities for 
 ### 📖 [Interactive Demo](./index.html)
 Complete interactive demo showcasing all MarkinJS features:
 - All annotation types (bounding boxes, polygons, keypoints)
+- Zoom and pan: pinch, Ctrl / Cmd + wheel, drags, keys and buttons
 - Real-time event logging and coordinate tracking
 - API demonstrations and code examples
 - Interactive controls and configuration options
@@ -27,7 +28,8 @@ Comprehensive API reference with examples:
 1. **Choose an example** based on your use case
 2. **Open the HTML file** in your browser
 3. **Start editing** - click an annotation, then drag it, its corners, its vertices or its keypoints
-4. **Read the data** in the "Annotations" panel: it is what the `change` event hands to your app
+4. **Zoom in** - pinch, or hold Ctrl / Cmd and scroll; then drag the empty canvas to move around
+5. **Read the data** in the "Annotations" panel: it is what the `change` event hands to your app
 
 ## File Structure
 

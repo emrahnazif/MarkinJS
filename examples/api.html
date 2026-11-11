@@ -88,7 +88,7 @@
         <div class="hero-body">
             <div class="container">
                 <h1 class="title is-2">MarkinJS API Documentation</h1>
-                <p class="subtitle is-4">Version 0.2 - getting started and reference</p>
+                <p class="subtitle is-4">Version 0.3 - getting started and reference</p>
             </div>
         </div>
     </section>
@@ -112,12 +112,14 @@
                                 <li><a href="#data" class="menu-item">Data</a></li>
                                 <li><a href="#selection" class="menu-item">Selection</a></li>
                                 <li><a href="#history" class="menu-item">History and State</a></li>
+                                <li><a href="#view" class="menu-item">View</a></li>
                                 <li><a href="#events" class="menu-item">Events</a></li>
                                 <li><a href="#options" class="menu-item">Options</a></li>
                             </ul>
                             <p class="menu-label">Guides</p>
                             <ul class="menu-list">
                                 <li><a href="#keyboard" class="menu-item">Keyboard</a></li>
+                                <li><a href="#zoom" class="menu-item">Zoom and Pan</a></li>
                                 <li><a href="#recipes" class="menu-item">Recipes</a></li>
                                 <li><a href="#migrating" class="menu-item">Migrating from 0.1</a></li>
                             </ul>
@@ -147,8 +149,8 @@
                             <pre class="code-highlight"><code>import MarkinJS from 'markinjs';        // ES module
 const MarkinJS = require('markinjs');   // CommonJS</code></pre>
                             <p>Or with a script tag. Keep the version in the file name or URL, so an update is always a visible change:</p>
-                            <pre class="code-highlight"><code>&lt;script src="https://unpkg.com/markinjs@0.2.0/dist/markin.min.js"&gt;&lt;/script&gt;
-&lt;script src="/static/js/markin-0.2.0.min.js"&gt;&lt;/script&gt;</code></pre>
+                            <pre class="code-highlight"><code>&lt;script src="https://unpkg.com/markinjs@0.3.0/dist/markin.min.js"&gt;&lt;/script&gt;
+&lt;script src="/static/js/markin-0.3.0.min.js"&gt;&lt;/script&gt;</code></pre>
                         </section>
 
                         <section id="quick-start">
@@ -213,8 +215,9 @@ MarkinJS.denormalize(annotations, width, height);  // fractions -&gt; pixels</co
                                 It throws a <code>TypeError</code> if the target cannot be found.
                             </p>
                             <ul>
-                                <li><strong>An image:</strong> MarkinJS wraps it in a <code>&lt;div&gt;</code> and lays an SVG over the picture as the browser draws it (borders, padding, <code>object-fit</code> and <code>object-position</code> are accounted for). The coordinate system is the image's natural size. <code>destroy()</code> puts the page back.</li>
-                                <li><strong>An SVG:</strong> MarkinJS draws into its own <code>&lt;g class="markin-layer"&gt;</code> and touches nothing else. The <code>viewBox</code> is the coordinate system and the area annotations stay inside. Use this when a framework owns the image element.</li>
+                                <li><strong>An image:</strong> MarkinJS wraps it in a viewport and a stage (two <code>&lt;div&gt;</code>s) and lays an SVG over the picture as the browser draws it (borders, padding, <code>object-fit</code> and <code>object-position</code> are accounted for). The coordinate system is the image's natural size. <code>destroy()</code> puts the page back.</li>
+                                <li><strong>An SVG:</strong> MarkinJS draws into its own <code>&lt;g class="markin-layer"&gt;</code>. The <code>viewBox</code> is the coordinate system and the area annotations stay inside. The SVG is wrapped in a viewport and a stage too, unless it is positioned over other content.</li>
+                                <li><strong>Markup you own</strong> (a framework, or an SVG laid over a picture): mark the element that holds the picture and the SVG with <code>data-markin-stage</code>. MarkinJS zooms that element inside its parent and changes nothing else.</li>
                             </ul>
                             <p>Calling <code>create()</code> again on the same element replaces the earlier editor.</p>
                         </section>
@@ -266,14 +269,34 @@ MarkinJS.denormalize(annotations, width, height);  // fractions -&gt; pixels</co
                                         <tr><td><code>undo()</code> / <code>redo()</code></td><td>Return <code>true</code> if a step was taken.</td></tr>
                                         <tr><td><code>canUndo()</code> / <code>canRedo()</code></td><td>For enabling buttons.</td></tr>
                                         <tr><td><code>clearHistory()</code></td><td>Forget the steps, keep the data.</td></tr>
-                                        <tr><td><code>enable()</code> / <code>disable()</code> / <code>isEnabled()</code></td><td>When disabled, pointer events pass through to whatever is underneath.</td></tr>
+                                        <tr><td><code>enable()</code> / <code>disable()</code> / <code>isEnabled()</code></td><td>A disabled editor edits nothing: pointer events pass through the annotations to whatever is underneath. Its view can still be zoomed and moved, and it still emits <code>hover</code> and <code>canvasclick</code>.</td></tr>
                                         <tr><td><code>setOptions(options)</code> / <code>getOptions()</code></td><td>Change options at run time.</td></tr>
-                                        <tr><td><code>refresh()</code></td><td>Re-measure the on-screen scale now. Only needed right after you scale the canvas from code with a CSS transform; otherwise the editor re-measures by itself.</td></tr>
-                                        <tr><td><code>getSVGElement()</code> / <code>getImageElement()</code> / <code>getContainerElement()</code></td><td>The elements involved.</td></tr>
+                                        <tr><td><code>refresh()</code></td><td>Re-measure the canvas now. Only needed right after your own code scaled or moved it with a CSS transform; otherwise the editor re-measures by itself.</td></tr>
+                                        <tr><td><code>getSVGElement()</code> / <code>getImageElement()</code> / <code>getContainerElement()</code></td><td>The SVG, the image under it (or <code>null</code>), and the viewport that clips the zoomed picture (or <code>null</code>).</td></tr>
                                         <tr><td><code>destroy()</code></td><td>Remove everything the editor added and put the page back.</td></tr>
                                     </tbody>
                                 </table>
                             </div>
+                        </section>
+
+                        <section id="view">
+                            <h2 class="title is-3">View</h2>
+                            <div class="table-container">
+                                <table class="table is-striped is-fullwidth">
+                                    <thead><tr><th>Method</th><th>Description</th></tr></thead>
+                                    <tbody>
+                                        <tr><td><code>getView()</code></td><td><code>{ x, y, width, height, scale }</code>: the visible part of the image in whole image pixels, rounded outward and kept inside the image, and the screen pixels per image pixel. <code>null</code> while the page is not laid out.</td></tr>
+                                        <tr><td><code>setView({ x, y, width, height })</code></td><td>Show at least this part of the image, as large as it fits.</td></tr>
+                                        <tr><td><code>zoomBy(factor, at?)</code></td><td>Zoom in (<code>factor</code> above 1) or out, around <code>at = { x, y }</code> in image pixels, or else the middle of the view.</td></tr>
+                                        <tr><td><code>fit()</code></td><td>Show the whole image.</td></tr>
+                                        <tr><td><code>zoomTo(id, { padding = 40 })</code></td><td>Frame one annotation, with <code>padding</code> screen pixels around it.</td></tr>
+                                        <tr><td><code>step(1)</code> / <code>step(-1)</code></td><td>Select the next / the previous annotation, in the order of the list, and frame it. <code>false</code> at the ends.</td></tr>
+                                        <tr><td><code>toImage(clientX, clientY)</code></td><td>A point on screen as a point of the image.</td></tr>
+                                        <tr><td><code>toClient(x, y)</code></td><td>A point of the image as a point on screen.</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <p>See <a href="#zoom">Zoom and Pan</a> for what the user can do and for the limits of the view.</p>
                         </section>
 
                         <section id="events">
@@ -291,7 +314,9 @@ MarkinJS.denormalize(annotations, width, height);  // fractions -&gt; pixels</co
                                         <tr><td><code>dragstart</code>, <code>drag</code></td><td><code>{ id, part, index, handle, position, annotation }</code></td><td>While dragging. Use <code>drag</code> for live read-outs.</td></tr>
                                         <tr><td><code>dragend</code></td><td>the same plus <code>changed</code>, <code>cancelled</code></td><td>A drag ended. A <code>change</code> follows if something changed.</td></tr>
                                         <tr><td><code>hover</code></td><td><code>{ position, id, part, index }</code></td><td>The pointer moved over the canvas (at most once per frame).</td></tr>
-                                        <tr><td><code>canvasclick</code></td><td><code>{ position }</code></td><td>A click that hit no annotation.</td></tr>
+                                        <tr><td><code>canvasclick</code></td><td><code>{ position }</code></td><td>A click that hit no annotation and was not a drag of the view.</td></tr>
+                                        <tr><td><code>viewchange</code></td><td><code>{ x, y, width, height, scale }</code></td><td>The view moved or the canvas changed size (at most once per frame). Also once for the first view.</td></tr>
+                                        <tr><td><code>viewsettle</code></td><td><code>{ x, y, width, height, scale }</code></td><td>The view has been still for <code>settleDelay</code> and shows another part of the image than when this last fired. Also for the first view, and for a new picture.</td></tr>
                                     </tbody>
                                 </table>
                             </div>
@@ -306,6 +331,10 @@ MarkinJS.denormalize(annotations, width, height);  // fractions -&gt; pixels</co
                             <p>
                                 A press on an annotation does not bubble as <code>pointerdown</code> or <code>mousedown</code>;
                                 listen for <code>click</code>, or for the editor's own <code>select</code>. A press on empty canvas bubbles as usual.
+                                The <code>click</code> that the browser sends when a drag of the view is released is swallowed.
+                            </p>
+                            <p>
+                                A disabled editor still emits <code>hover</code> (with <code>id: null</code>) and <code>canvasclick</code> (for every click, wherever it lands).
                             </p>
                         </section>
 
@@ -331,6 +360,12 @@ MarkinJS.denormalize(annotations, width, height);  // fractions -&gt; pixels</co
                                         <tr><td><code>historyEnabled</code></td><td><code>true</code></td><td>Undo / redo.</td></tr>
                                         <tr><td><code>historyMaxStates</code></td><td><code>50</code></td><td>States kept, including the current one.</td></tr>
                                         <tr><td><code>strokeWidth</code>, <code>keypointRadius</code>, <code>handleRadius</code></td><td><code>2</code>, <code>5</code>, <code>5</code></td><td>Sizes in <strong>screen</strong> pixels.</td></tr>
+                                        <tr><td><code>zoomControls</code></td><td><code>true</code></td><td>Let the user zoom and pan. With <code>false</code> the view only moves through the methods.</td></tr>
+                                        <tr><td><code>wheel</code></td><td><code>'pan'</code></td><td>What a plain wheel or two-finger scroll does: <code>'pan'</code> or <code>'zoom'</code>.</td></tr>
+                                        <tr><td><code>panOnEmpty</code></td><td><code>true</code></td><td>A drag that starts on empty canvas moves the view, once it is zoomed in.</td></tr>
+                                        <tr><td><code>maxScale</code></td><td><code>32</code></td><td>How far the view zooms in, in screen pixels per image pixel.</td></tr>
+                                        <tr><td><code>stepKeys</code></td><td><code>false</code></td><td><code>n</code> and <code>p</code> select the next and the previous annotation and frame it.</td></tr>
+                                        <tr><td><code>settleDelay</code></td><td><code>250</code></td><td>Milliseconds the view has to stay still before <code>viewsettle</code>.</td></tr>
                                         <tr><td><code>strict</code></td><td><code>false</code></td><td>Throw on invalid input instead of logging.</td></tr>
                                         <tr><td><code>silent</code> / <code>logger</code></td><td><code>false</code> / <code>null</code></td><td>Silence the log, or receive it as <code>logger(level, message)</code>.</td></tr>
                                     </tbody>
@@ -362,13 +397,72 @@ MarkinJS.denormalize(annotations, width, height);  // fractions -&gt; pixels</co
                                         <tr><td>Ctrl / Cmd + Z</td><td>Undo.</td></tr>
                                         <tr><td>Ctrl / Cmd + Shift + Z, Ctrl + Y</td><td>Redo.</td></tr>
                                         <tr><td>Escape</td><td>Cancel a drag, or deselect.</td></tr>
+                                        <tr><td><code>+</code>, <code>-</code></td><td>Zoom in, zoom out.</td></tr>
+                                        <tr><td>Shift + 1, Shift + 0</td><td>The whole image; the image at its real pixels.</td></tr>
+                                        <tr><td>Space (held)</td><td>A drag moves the view, from anywhere.</td></tr>
+                                        <tr><td><code>n</code>, <code>p</code></td><td>Next, previous annotation. Only with <code>stepKeys: true</code>.</td></tr>
                                     </tbody>
                                 </table>
                             </div>
                             <p>
                                 Keys are ignored while the user types in an input, textarea, select or editable element, also inside web components.
-                                With several editors on a page, only the one the user last pressed on reacts. Holding an arrow key is a single undo step.
+                                With several editors on a page, only the one the user last pressed on reacts; Space belongs to the editor the pointer is over.
+                                Holding an arrow key is a single undo step. A key is only taken when it does something.
                             </p>
+                            <p>The zoom keys also work in a disabled editor. <code>keyboardControls: false</code> switches every key off.</p>
+                        </section>
+
+                        <section id="zoom">
+                            <h2 class="title is-3">Zoom and Pan</h2>
+                            <p>The editor zooms and pans by itself. There is nothing to wire up.</p>
+                            <div class="table-container">
+                                <table class="table is-striped is-fullwidth">
+                                    <thead><tr><th>Input</th><th>Action</th></tr></thead>
+                                    <tbody>
+                                        <tr><td>Trackpad pinch, Ctrl / Cmd + wheel</td><td>Zoom towards the pointer.</td></tr>
+                                        <tr><td>Wheel, two-finger scroll</td><td>Move the view. With <code>wheel: 'zoom'</code>: zoom towards the pointer.</td></tr>
+                                        <tr><td>Drag on empty canvas</td><td>Move the view, once it is zoomed in (<code>panOnEmpty</code>).</td></tr>
+                                        <tr><td>Space + drag, middle-button drag</td><td>Move the view from anywhere, also from on top of an annotation.</td></tr>
+                                        <tr><td><code>+</code> / <code>-</code>, Shift + 1, Shift + 0</td><td>Zoom in / out, the whole image, real pixels.</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <p>
+                                The view goes from the whole image, as your page lays it out, up to <code>maxScale</code> screen pixels per image pixel.
+                                It stops a handle's width past the edges of the image, so a handle that sits on the edge can always be reached.
+                                A click still selects, and a drag of the view never selects or edits anything.
+                            </p>
+                            <p>
+                                While the whole image is in view, a plain wheel is left to the page, which scrolls as usual.
+                                <code>zoomControls: false</code> switches all of this input off; the <a href="#view">view methods</a> keep working.
+                            </p>
+
+                            <h3 class="title is-4">Work on the visible part</h3>
+                            <p>
+                                <code>getView()</code> can be used as a crop as it is. <code>viewsettle</code> is the moment for work that is too
+                                expensive to do on every movement, such as running a model on what is visible.
+                            </p>
+                            <pre class="code-highlight"><code>let latest = 0;
+editor.on('viewsettle', async (view) =&gt; {
+    const request = ++latest;
+    const result = await analyse(imageId, view); // your code: view.x, view.y, view.width, view.height
+    if (request !== latest) return;              // the view has moved on since: drop this answer
+    show(result);
+});</code></pre>
+
+                            <h3 class="title is-4">What happens on your page</h3>
+                            <ul>
+                                <li>The box the image has on your page is the window. Zoomed in, the picture is clipped to it. At rest nothing is clipped and nothing is transformed.</li>
+                                <li>An image that its own box crops (<code>object-fit: cover</code>) stays cropped: the view never shows more than your page shows at rest.</li>
+                                <li>On a touch screen, one finger moves annotations and the view. Pinch is not handled yet: give touch users buttons that call <code>zoomBy()</code>.</li>
+                            </ul>
+                            <pre class="code-highlight"><code>&lt;!-- Markup you own: the marked element is zoomed, its parent is the window --&gt;
+&lt;div class="window"&gt;
+    &lt;div data-markin-stage style="position: relative; display: inline-block; line-height: 0"&gt;
+        &lt;img src="photo.jpg" alt=""&gt;
+        &lt;svg viewBox="0 0 1280 853" style="position: absolute; inset: 0; width: 100%; height: 100%"&gt;&lt;/svg&gt;
+    &lt;/div&gt;
+&lt;/div&gt;</code></pre>
                         </section>
 
                         <section id="recipes">
@@ -401,9 +495,26 @@ const keypoints = annotation.keypoints.map((kp, i) =&gt; (i === index ? { ...kp,
 editor.updateAnnotation(id, { keypoints });</code></pre>
 
                             <h3 class="title is-4">Hand the canvas to another tool for a while</h3>
-                            <pre class="code-highlight"><code>editor.disable();   // pointer events now reach whatever is under the overlay
-// ...run your own drawing or model-assisted mode...
+                            <pre class="code-highlight"><code>editor.disable();   // nothing is edited; the view still zooms and moves
+const stop = editor.on('canvasclick', ({ position }) =&gt; {
+    addPoint(position.x, position.y);   // image pixels, at any zoom; never a drag of the view
+});
+// ...when your own drawing or model-assisted mode ends:
+stop();
 editor.enable();</code></pre>
+
+                            <h3 class="title is-4">Zoom buttons and a read-out</h3>
+                            <pre class="code-highlight"><code>zoomIn.onclick = () =&gt; editor.zoomBy(1.5);
+zoomOut.onclick = () =&gt; editor.zoomBy(1 / 1.5);
+whole.onclick = () =&gt; editor.fit();
+editor.on('viewchange', (view) =&gt; {
+    readout.textContent = Math.round(view.scale * 100) + '%';
+});</code></pre>
+
+                            <h3 class="title is-4">Go through the annotations one by one</h3>
+                            <pre class="code-highlight"><code>next.onclick = () =&gt; { if (!editor.step(1)) say('That was the last one.'); };
+previous.onclick = () =&gt; editor.step(-1);
+// or leave it to the keyboard: MarkinJS.create(img, { stepKeys: true }) puts it on n and p</code></pre>
 
                             <h3 class="title is-4">Draw a skeleton</h3>
                             <pre class="code-highlight"><code>MarkinJS.create(img, {
@@ -433,7 +544,7 @@ editor.enable();</code></pre>
                                         <tr><td><code>deleteElement()</code>, <code>deleteGroup()</code></td><td><code>deleteAnnotation(id)</code></td></tr>
                                         <tr><td><code>deleteSelectedElement()</code>, <code>getSelectedElement()</code></td><td><code>deleteSelected()</code>, <code>getSelection()</code></td></tr>
                                         <tr><td><code>exportAllAnnotations()</code>, <code>exportAnnotation()</code>, <code>getAnnotationsAsJSON()</code></td><td><code>getAnnotations()</code>, <code>getAnnotation(id)</code></td></tr>
-                                        <tr><td><code>setZoom()</code>, <code>zoom</code>, <code>updateDimensions()</code></td><td>not needed; <code>refresh()</code></td></tr>
+                                        <tr><td><code>setZoom()</code>, <code>zoom</code>, <code>updateDimensions()</code></td><td>not needed: zoom is built in (<code>zoomBy()</code>, <code>setView()</code>, …)</td></tr>
                                         <tr><td><code>enableKeyboardControls()</code>, <code>setDeletionRules()</code>, <code>setRequireSelectionToDrag()</code></td><td><code>setOptions({ ... })</code></td></tr>
                                         <tr><td><code>saveState()</code>, <code>history.hasUndo()</code></td><td>every edit is recorded; <code>canUndo()</code>, <code>canRedo()</code></td></tr>
                                         <tr><td><code>annotationcreated</code>, <code>annotationupdated</code>, <code>annotationmodificationcomplete</code>, <code>elementmoved</code>, <code>delete</code>, <code>deletegroup</code>, <code>keypointadded</code></td><td><code>change</code></td></tr>
