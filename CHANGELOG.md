@@ -21,7 +21,7 @@ in the README lists what can still change on a page.
 - `step(1)` / `step(-1)` select the next / previous annotation and frame it. `stepKeys` puts them on `n` and `p`.
 - Options `zoomControls`, `wheel` (`'pan'` or `'zoom'`), `panOnEmpty`, `maxScale`, `stepKeys` and `settleDelay`.
 - `data-markin-stage` marks the element to zoom when the page owns the markup around the SVG.
-- Tests that drive real wheel, pinch, pointer and keyboard input for all of the above (408 tests in total).
+- Tests that drive real wheel, pinch, pointer and keyboard input for all of the above (409 tests in total).
 
 ### Changed
 - The canvas sits in a viewport and a stage, and zooming is one CSS transform on the stage. An `<svg>` passed to

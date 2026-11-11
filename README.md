@@ -319,7 +319,8 @@ editor.on('hover', ({ position }) => preview(position.x, position.y));
 ```
 
 For anything else on screen, `toImage(event.clientX, event.clientY)` and `toClient(x, y)` convert both ways.
-Reposition what you placed with `toClient()` on `viewchange`.
+Reposition what you placed with `toClient()` on `viewchange`. With many things to place, convert them all first
+and write to the page after: each call measures the page.
 
 ### Reviewing small objects
 
