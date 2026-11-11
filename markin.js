@@ -1255,6 +1255,20 @@ const MarkinJS = (function () {
             return true;
         }
 
+        // Frame one annotation: its bbox, or else whatever it is made of.
+        zoomTo(id, settings) {
+            if (this.dead) return false;
+            const ann = this._find('zoomTo', id);
+            if (!ann) return false;
+            const padding = isObject(settings) && settings.padding !== undefined ? settings.padding : 40;
+            if (!(isNum(padding) && padding >= 0)) {
+                this._problem('zoomTo: padding must be a number of screen pixels, 0 or more');
+                return false;
+            }
+            const box = extent(pointsOf(ann, hasBox(ann) ? ['bbox'] : ['polygon', 'keypoint']));
+            return !!box && this._show(box.x1, box.y1, box.x2, box.y2, padding);
+        }
+
         toImage(clientX, clientY) {
             if (this.dead) return null;
             if (!(isNum(clientX) && isNum(clientY))) {
@@ -2535,6 +2549,7 @@ const MarkinJS = (function () {
         'setView',
         'zoomBy',
         'fit',
+        'zoomTo',
         'toImage',
         'toClient',
         'getSVGElement',

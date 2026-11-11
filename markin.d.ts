@@ -244,6 +244,11 @@ declare namespace MarkinJS {
         zoomBy(factor: number, at?: Point | null): boolean;
         /** Show the whole image. */
         fit(): boolean;
+        /**
+         * Frame one annotation: its bbox, or else its polygon and keypoints. `padding` is the room left
+         * around it, in screen pixels. Default `40`.
+         */
+        zoomTo(id: string | number, settings?: { padding?: number }): boolean;
         /** A point on screen (`clientX`, `clientY` of an event) as a point of the image. */
         toImage(clientX: number, clientY: number): Point | null;
         /** A point of the image as a point on screen, in the coordinates of `clientX` and `clientY`. */

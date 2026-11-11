@@ -181,6 +181,76 @@ describe('setView', () => {
     });
 });
 
+describe('zoomTo', () => {
+    const things = [
+        {
+            id: 'box',
+            bbox: [780, 590, 40, 20],
+            segments: [
+                [0, 0],
+                [1600, 0],
+                [1600, 1200]
+            ]
+        },
+        {
+            id: 'shape',
+            segments: [
+                [100, 100],
+                [300, 100],
+                [300, 200],
+                [100, 200]
+            ]
+        },
+        { id: 'dot', keypoints: [{ point: [400, 900] }, { point: [0, 0], v: 0 }] }
+    ];
+    const start = (options) => makeEditor({ annotations: things, ...options }, HALF);
+
+    it('frames the bbox of an annotation, 40 screen pixels from the edges', () => {
+        const { editor } = start();
+        expect(editor.zoomTo('box')).toBe(true);
+        // 40 x 20 image pixels in the 720 x 520 that the padding leaves: 18 screen pixels each.
+        expect(editor.getView().scale).toBe(18);
+        expect(editor.toClient(800, 600)).toEqual({ x: 420, y: 320 });
+        expect(editor.toClient(780, 590)).toEqual({ x: 60, y: 140 });
+    });
+
+    it('takes the padding it is given', () => {
+        const { editor } = start();
+        editor.zoomTo('box', { padding: 0 });
+        expect(editor.getView()).toEqual({ x: 780, y: 585, width: 40, height: 30, scale: 20 });
+        editor.zoomTo('box', { padding: 200 });
+        expect(editor.getView().scale).toBe(10);
+    });
+
+    it('frames the polygon or the labelled keypoints of an annotation without a bbox', () => {
+        const { editor } = start();
+        editor.zoomTo('shape', { padding: 0 });
+        expect(editor.getView()).toEqual({ x: 100, y: 75, width: 200, height: 150, scale: 4 });
+        // A single point has no size: as close as the view goes, with the point in the middle.
+        editor.zoomTo('dot');
+        expect(editor.getView().scale).toBe(32);
+        expect(editor.toClient(400, 900)).toEqual({ x: 420, y: 320 });
+    });
+
+    it('does not go past maxScale, and leaves the selection alone', () => {
+        const { editor } = start({ maxScale: 2 });
+        editor.select('shape');
+        editor.zoomTo('box');
+        expect(editor.getView().scale).toBe(2);
+        expect(editor.getSelection().id).toBe('shape');
+    });
+
+    it('needs an annotation that exists and a sensible padding', () => {
+        const { editor, log } = start();
+        expect(editor.zoomTo('nobody')).toBe(false);
+        expect(editor.zoomTo('box', { padding: -1 })).toBe(false);
+        expect(editor.zoomTo('box', { padding: '10' })).toBe(false);
+        expect(log.length).toBe(3);
+        expect(log[0]).toMatch(/zoomTo: no annotation with id "nobody"/);
+        expect(written(editor).transform).toBe('');
+    });
+});
+
 describe('toImage and toClient', () => {
     it('convert between the screen and the image at every zoom', () => {
         const { editor } = makeEditor({}, HALF);
