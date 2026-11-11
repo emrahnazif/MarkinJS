@@ -1,26 +1,17 @@
-import { describe, it, expect, afterEach } from 'vitest';
-import { MarkinJS, track, setBox, drag, bboxEl, BOX, SVG_NS } from './setup.js';
-
-// An <img> whose natural size can be changed, as when `src` is swapped for the next image.
-function makeImage({ width = 1280, height = 853 } = {}) {
-    const holder = document.createElement('div');
-    holder.id = 'holder';
-    const before = document.createElement('span');
-    const image = document.createElement('img');
-    const after = document.createElement('span');
-    image.id = 'photo';
-    const size = { width, height };
-    Object.defineProperty(image, 'naturalWidth', { get: () => size.width });
-    Object.defineProperty(image, 'naturalHeight', { get: () => size.height });
-    holder.append(before, image, after);
-    document.body.appendChild(holder);
-    const load = (w, h) => {
-        size.width = w;
-        size.height = h;
-        image.dispatchEvent(new Event('load'));
-    };
-    return { holder, image, before, after, load };
-}
+import { describe, it, expect } from 'vitest';
+import {
+    MarkinJS,
+    makeEditor,
+    makeImage,
+    track,
+    setBox,
+    setStyle,
+    stageOf,
+    drag,
+    bboxEl,
+    BOX,
+    SVG_NS
+} from './setup.js';
 
 describe('an editor over an <img>', () => {
     it('lays an SVG over the image, in image pixels', () => {
@@ -31,7 +22,7 @@ describe('an editor over an <img>', () => {
 
         expect(editor.getImageElement()).toBe(image);
         // A viewport that clips, and inside it a stage that is zoomed: the image and its overlay.
-        const stage = container.firstChild;
+        const stage = stageOf(editor);
         expect(container.parentNode).toBe(holder);
         expect(Array.from(container.children)).toEqual([stage]);
         expect(stage.className).toBe('markin-stage');
@@ -150,7 +141,7 @@ describe('an editor over an <img>', () => {
 
         const picture = holder.querySelector('picture');
         expect(image.parentNode).toBe(picture);
-        expect(Array.from(editor.getContainerElement().firstChild.children)).toEqual([picture, editor.getSVGElement()]);
+        expect(Array.from(stageOf(editor).children)).toEqual([picture, editor.getSVGElement()]);
         expect(log.length).toBe(1);
         expect(log[0]).toMatch(/^warn: the image uses srcset or <picture>/);
         editor.destroy();
@@ -204,11 +195,6 @@ describe('an editor over an <img>', () => {
     describe('placing the overlay where the image is actually drawn', () => {
         // jsdom has no layout, so the image's box and computed style are supplied by the test:
         // a 200 x 100 image whose content box is 400 x 300, at 10, 20 inside its wrapper.
-        const realComputedStyle = window.getComputedStyle;
-        afterEach(() => {
-            window.getComputedStyle = realComputedStyle;
-        });
-
         function place(style, box = {}) {
             const { image } = makeImage({ width: 200, height: 100 });
             const layout = { clientWidth: 400, clientHeight: 300, offsetLeft: 10, offsetTop: 20, ...box };
@@ -231,7 +217,7 @@ describe('an editor over an <img>', () => {
                 objectPosition: '50% 50%',
                 ...style
             };
-            window.getComputedStyle = (el) => (el === image ? computed : realComputedStyle(el));
+            setStyle(image, computed);
             const svg = track(MarkinJS.create(image, { silent: true })).getSVGElement();
             const n = (value) => parseFloat(value);
             return {
@@ -307,22 +293,16 @@ describe('an editor on an <svg>', () => {
         document.body.appendChild(holder);
         return { holder, svg: holder.querySelector('svg'), html: holder.innerHTML };
     }
-    const collect = () => {
-        const log = [];
-        return { log, logger: (level, message) => log.push(`${level}: ${message}`) };
-    };
-
     it('wraps the <svg> in a viewport and a stage, and destroy puts the page back', () => {
         const { holder, svg, html } = page('<b></b><svg viewBox="0 0 800 600"></svg><i></i>');
-        const { log, logger } = collect();
-        const editor = MarkinJS.create(svg, { logger, annotations: [BOX] });
+        const { editor, log } = makeEditor({ annotations: [BOX] }, svg);
         const viewport = editor.getContainerElement();
 
         expect(viewport.className).toBe('markin-container');
         expect(viewport.parentNode).toBe(holder);
         expect(viewport.previousSibling.localName).toBe('b');
-        expect(viewport.firstChild.className).toBe('markin-stage');
-        expect(Array.from(viewport.firstChild.children)).toEqual([svg]);
+        expect(stageOf(editor).className).toBe('markin-stage');
+        expect(Array.from(stageOf(editor).children)).toEqual([svg]);
         // An <svg> is inline unless the page says otherwise, and so is what stands in for it.
         expect(viewport.style.display).toBe('inline-block');
         expect(log).toEqual([]);
@@ -341,8 +321,7 @@ describe('an editor on an <svg>', () => {
         const { holder, svg, html } = page(
             '<section><div data-markin-stage style="position: relative;"><img alt=""><svg viewBox="0 0 800 600"></svg></div></section>'
         );
-        const { log, logger } = collect();
-        const editor = MarkinJS.create(svg, { logger });
+        const { editor, log } = makeEditor({}, svg);
         const stage = holder.querySelector('[data-markin-stage]');
         expect(editor.getContainerElement()).toBe(holder.querySelector('section'));
         expect(svg.parentNode).toBe(stage);
@@ -354,22 +333,16 @@ describe('an editor on an <svg>', () => {
     });
 
     it('does not wrap an <svg> that is positioned over something else, and says how to get zoom', () => {
-        const real = window.getComputedStyle;
-        try {
-            const { holder, svg } = page('<img alt=""><svg viewBox="0 0 800 600"></svg>');
-            window.getComputedStyle = (el) => (el === svg ? { position: 'absolute', display: 'block' } : real(el));
-            const { log, logger } = collect();
-            const editor = track(MarkinJS.create(svg, { logger, annotations: [BOX] }));
-            expect(svg.parentNode).toBe(holder);
-            expect(holder.querySelector('.markin-container')).toBe(null);
-            expect(editor.getContainerElement()).toBe(null);
-            expect(log.length).toBe(1);
-            expect(log[0]).toMatch(/^warn: zoom and pan are off: .*data-markin-stage/);
-            // It still edits, as it did before there was zoom.
-            expect(editor.getAnnotations()).toEqual([BOX]);
-        } finally {
-            window.getComputedStyle = real;
-        }
+        const { holder, svg } = page('<img alt=""><svg viewBox="0 0 800 600"></svg>');
+        setStyle(svg, { position: 'absolute', display: 'block' });
+        const { editor, log } = makeEditor({ annotations: [BOX] }, svg);
+        expect(svg.parentNode).toBe(holder);
+        expect(holder.querySelector('.markin-container')).toBe(null);
+        expect(editor.getContainerElement()).toBe(null);
+        expect(log.length).toBe(1);
+        expect(log[0]).toMatch(/^warn: zoom and pan are off: .*data-markin-stage/);
+        // It still edits, as it did before there was zoom.
+        expect(editor.getAnnotations()).toEqual([BOX]);
     });
 
     it('undoes the wrapping when it would resize the <svg>', () => {
@@ -380,8 +353,7 @@ describe('an editor on an <svg>', () => {
             const width = svg.parentNode === holder ? 600 : 150;
             return { left: 0, top: 0, width, height: 450 };
         };
-        const { log, logger } = collect();
-        const editor = track(MarkinJS.create(svg, { logger }));
+        const { editor, log } = makeEditor({}, svg);
         expect(svg.parentNode).toBe(holder);
         expect(holder.querySelector('.markin-container')).toBe(null);
         expect(editor.getContainerElement()).toBe(null);
@@ -396,11 +368,10 @@ describe('an editor on an <svg>', () => {
             const fits = !viewport || (viewport.style.width === '100%' && viewport.style.height === '100%');
             return { left: 0, top: 0, width: fits ? 600 : 150, height: fits ? 450 : 150 };
         };
-        const { log, logger } = collect();
-        const editor = track(MarkinJS.create(svg, { logger }));
+        const { editor, log } = makeEditor({}, svg);
         const viewport = editor.getContainerElement();
         expect(viewport.parentNode).toBe(holder);
-        expect([viewport.style.width, viewport.style.height, viewport.firstChild.style.height]).toEqual([
+        expect([viewport.style.width, viewport.style.height, stageOf(editor).style.height]).toEqual([
             '100%',
             '100%',
             '100%'
