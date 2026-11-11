@@ -118,6 +118,8 @@ declare namespace MarkinJS {
          * stops at the image as the page lays it out.
          */
         maxScale?: number;
+        /** Milliseconds the view has to stay still before `viewsettle` fires. Default `250`. */
+        settleDelay?: number;
         /** Throw a `TypeError` on invalid input instead of logging it. Default `false`. */
         strict?: boolean;
         /** Log nothing. Default `false`. */
@@ -189,6 +191,13 @@ declare namespace MarkinJS {
         hover: (event: HoverEvent) => void;
         /** A click on the canvas that hit no annotation. */
         canvasclick: (event: CanvasClickEvent) => void;
+        /** The view moved or the canvas changed size: at most once per frame. Also once for the first view. */
+        viewchange: (view: View) => void;
+        /**
+         * The view has stopped changing for `settleDelay` milliseconds and shows another part of the image
+         * than when this last fired. Also once for the first view, and for a new picture.
+         */
+        viewsettle: (view: View) => void;
     }
 
     // ---------------------------------------------------------------- editor

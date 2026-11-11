@@ -11,7 +11,18 @@ const MarkinJS = (function () {
     const VERSION = '0.2.0';
     const SVG_NS = 'http://www.w3.org/2000/svg';
 
-    const EVENTS = ['change', 'select', 'deselect', 'dragstart', 'drag', 'dragend', 'hover', 'canvasclick'];
+    const EVENTS = [
+        'change',
+        'select',
+        'deselect',
+        'dragstart',
+        'drag',
+        'dragend',
+        'hover',
+        'canvasclick',
+        'viewchange',
+        'viewsettle'
+    ];
     const PARTS = ['bbox', 'polygon', 'keypoint'];
     const ARROWS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
 
@@ -40,6 +51,7 @@ const MarkinJS = (function () {
         keypointRadius: [5, 'positive'],
         handleRadius: [5, 'positive'],
         maxScale: [32, 'positive'],
+        settleDelay: [250, 'delay'],
         strict: [false, 'boolean'],
         silent: [false, 'boolean'],
         logger: [null, 'function?']
@@ -442,6 +454,8 @@ const MarkinJS = (function () {
                 return typeof value === 'string' && value ? null : 'must be a non-empty string';
             case 'positive':
                 return isNum(value) && value > 0 ? null : 'must be a positive number';
+            case 'delay':
+                return isNum(value) && value >= 0 ? null : 'must be a number of milliseconds, 0 or more';
             case 'function':
                 return typeof value === 'function' ? null : 'must be a function';
             case 'array':
@@ -744,6 +758,10 @@ const MarkinJS = (function () {
             this.unit = 1; // SVG user units per screen pixel
             this.view = { scale: 1, x: 0, y: 0 }; // the stage's transform: its scale, and where it is moved to
             this.stageSize = null; // the size of the stage the view was last limited for
+            this.viewFrame = 0;
+            this.viewKey = null; // what `viewchange` last reported
+            this.settleTimer = 0;
+            this.settledKey = null; // what `viewsettle` last reported
             this.history = { states: [[]], index: 0 };
             this.nudged = null; // id with arrow-key moves that are not committed yet
             this.nudgeTimer = 0;
@@ -764,6 +782,7 @@ const MarkinJS = (function () {
                 throw err;
             }
             claimKeyboard(this, false);
+            this._viewChanged(); // the first view is news too
         }
 
         // ---- setup / teardown
@@ -821,6 +840,7 @@ const MarkinJS = (function () {
             this.dead = true;
             this.enabled = false;
             for (const stop of this.cleanup) stop();
+            clearTimeout(this.settleTimer);
             this.listeners = Object.create(null);
             // Let go of everything that was drawn, and of the page's route back to this editor.
             this.layer.remove();
@@ -1048,6 +1068,7 @@ const MarkinJS = (function () {
             if (v.scale > g.maxScale) {
                 // The limit came down: zoom out around the middle of what is shown.
                 this._zoomAt(g.maxScale, g.left + (g.width * g.kx) / 2, g.top + (g.height * g.ky) / 2, g);
+                this._viewChanged();
                 return;
             }
             // A view that is zoomed in keeps showing the same part of the picture.
@@ -1055,6 +1076,8 @@ const MarkinJS = (function () {
             const x = was && was[0] > 0 ? (v.x * g.stageWidth) / was[0] : v.x;
             const y = was && was[1] > 0 ? (v.y * g.stageHeight) / was[1] : v.y;
             this._setView(v.scale, x, y, g);
+            // The same view shows another part of the image once the viewport has another size.
+            this._viewChanged();
         }
 
         // ---- view: zoom and pan
@@ -1145,6 +1168,7 @@ const MarkinJS = (function () {
             this._writeView();
             // Handles and outlines follow in the same frame.
             this._remeasure();
+            this._viewChanged();
             return true;
         }
 
@@ -1163,7 +1187,51 @@ const MarkinJS = (function () {
             if (!this.viewport) return;
             this.view = { scale: 1, x: 0, y: 0 };
             this.stageSize = null;
+            this.settledKey = null; // another picture is news, even at the same size
             this._writeView();
+        }
+
+        // The view may have changed. Tell the host, at most once per frame while it moves, and
+        // once more when it has come to rest.
+        _viewChanged() {
+            if (this.dead || !this.viewport) return;
+            if (!this.viewFrame) {
+                this.viewFrame = this._frame(() => {
+                    this.viewFrame = 0;
+                    this._announceView();
+                });
+            }
+            this._armSettle();
+        }
+
+        _announceView() {
+            const g = this._geometry();
+            if (!g) return;
+            // Every movement counts, also one too small to change the whole pixels getView() reports,
+            // and so does a canvas that changed size: something the host placed with toClient()
+            // has to follow.
+            const p = unmap(g.m, g.left, g.top);
+            const q = unmap(g.m, g.left + g.width * g.kx, g.top + g.height * g.ky);
+            const key = [p.x, p.y, q.x, q.y, g.scale].map((n) => Math.round(n * 1000)).join(' ');
+            if (key === this.viewKey) return;
+            this.viewKey = key;
+            if (this._has('viewchange')) this._emit('viewchange', this._viewOf(g));
+        }
+
+        _armSettle() {
+            clearTimeout(this.settleTimer);
+            this.settleTimer = this._later(() => this._settleView(), this.opts.settleDelay);
+        }
+
+        _settleView() {
+            this.settleTimer = 0;
+            const view = this.getView();
+            if (!view) return;
+            // Only a view that would give another crop is worth the host's work.
+            const key = [view.x, view.y, view.width, view.height].join(' ');
+            if (key === this.settledKey) return;
+            this.settledKey = key;
+            this._emit('viewsettle', view);
         }
 
         // Zoom to `scale`, keeping what is under the client point (clientX, clientY) where it is.

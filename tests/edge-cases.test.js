@@ -130,7 +130,7 @@ describe('input that is not what it seems', () => {
         editor.on('constructor', () => {});
         expect(log).toEqual([
             'error: unknown option "constructor"',
-            'error: unknown event "constructor". Events: change, select, deselect, dragstart, drag, dragend, hover, canvasclick'
+            'error: unknown event "constructor". Events: change, select, deselect, dragstart, drag, dragend, hover, canvasclick, viewchange, viewsettle'
         ]);
     });
 

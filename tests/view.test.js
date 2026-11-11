@@ -16,6 +16,7 @@ import {
     keypointEl,
     handleEl,
     num,
+    nextFrame,
     BOX,
     SVG_NS
 } from './setup.js';
@@ -363,6 +364,161 @@ describe('the view and the page', () => {
         expect(editor.getView()).toBe(null);
         expect(editor.zoomBy(2)).toBe(false);
         expect(editor.toImage(1, 1)).toBe(null);
+    });
+});
+
+describe('viewchange and viewsettle', () => {
+    const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    // An editor whose view events are collected from the start. The view settles after 30ms.
+    function watched(options, svgOptions = HALF) {
+        const made = makeEditor({ settleDelay: 30, ...options }, svgOptions);
+        made.changes = [];
+        made.settles = [];
+        made.editor.on('viewchange', (view) => made.changes.push(view));
+        made.editor.on('viewsettle', (view) => made.settles.push(view));
+        return made;
+    }
+    const WHOLE = { x: 0, y: 0, width: 1600, height: 1200, scale: 0.5 };
+
+    it('report the first view, once each', async () => {
+        const { changes, settles } = watched();
+        expect([changes, settles]).toEqual([[], []]);
+        await wait(80);
+        expect(changes).toEqual([WHOLE]);
+        expect(settles).toEqual([WHOLE]);
+    });
+
+    it('viewchange comes at most once per frame, with the view as it is then', async () => {
+        const { editor, changes } = watched();
+        await wait(80);
+        changes.length = 0;
+        editor.zoomBy(2);
+        editor.zoomBy(2);
+        editor.zoomBy(1.5, { x: 100, y: 100 });
+        expect(changes).toEqual([]);
+        await nextFrame();
+        expect(changes).toEqual([editor.getView()]);
+        expect(changes[0].scale).toBe(3);
+    });
+
+    it('viewsettle comes once, after the view has stopped moving', async () => {
+        const { editor, settles } = watched();
+        await wait(80);
+        settles.length = 0;
+        editor.zoomBy(2);
+        await wait(10);
+        editor.zoomBy(2);
+        await wait(10);
+        editor.zoomBy(2);
+        expect(settles).toEqual([]);
+        await wait(80);
+        expect(settles).toEqual([{ x: 700, y: 525, width: 200, height: 150, scale: 4 }]);
+    });
+
+    it('viewsettle stays quiet for a view that ends where it was', async () => {
+        const { editor, changes, settles } = watched();
+        await wait(80);
+        changes.length = 0;
+        settles.length = 0;
+        editor.zoomBy(2);
+        editor.fit();
+        editor.zoomBy(1);
+        editor.refresh();
+        await wait(80);
+        expect([changes, settles]).toEqual([[], []]);
+    });
+
+    it('a movement smaller than a pixel of the image is a viewchange but no new crop', async () => {
+        const { editor, changes, settles } = watched();
+        editor.zoomBy(60);
+        await wait(80);
+        const crop = editor.getView();
+        changes.length = 0;
+        settles.length = 0;
+        editor.zoomBy(1.001);
+        await wait(80);
+        const { scale, ...rect } = editor.getView();
+        expect(rect).toEqual({ x: crop.x, y: crop.y, width: crop.width, height: crop.height });
+        expect(scale).toBeGreaterThan(crop.scale);
+        expect(changes.length).toBe(1);
+        expect(settles).toEqual([]);
+    });
+
+    it('a canvas that is resized is a viewchange, and a viewsettle when it shows another part', async () => {
+        const { editor, svg, changes, settles } = watched();
+        editor.zoomBy(2);
+        await wait(80);
+        changes.length = 0;
+        settles.length = 0;
+        // Half the size, the same proportions: the same part of the image, at half the scale.
+        setBox(svg, { left: 20, top: 20, width: 400, height: 300 });
+        editor.refresh();
+        await wait(80);
+        expect(changes).toEqual([{ x: 400, y: 300, width: 800, height: 600, scale: 0.5 }]);
+        expect(settles).toEqual([]);
+
+        // Other proportions: the viewport is a different window onto the image now.
+        setBox(svg, { left: 20, top: 20, width: 400, height: 600 });
+        editor.refresh();
+        await wait(80);
+        expect(changes.length).toBe(2);
+        expect(settles).toEqual([changes[1]]);
+        expect(settles[0]).not.toMatchObject({ x: 400, y: 300, width: 800, height: 600 });
+    });
+
+    it('viewsettle reports a new picture, even one of the same size', async () => {
+        const image = document.createElement('img');
+        let address = 'first.jpg';
+        Object.defineProperty(image, 'naturalWidth', { get: () => 1600 });
+        Object.defineProperty(image, 'naturalHeight', { get: () => 1200 });
+        Object.defineProperty(image, 'currentSrc', { get: () => address });
+        document.body.appendChild(image);
+        const editor = track(MarkinJS.create(image, { silent: true, settleDelay: 30 }));
+        setBox(editor.getSVGElement(), HALF.box);
+        const settles = [];
+        editor.on('viewsettle', (view) => settles.push(view));
+        await wait(80);
+        expect(settles).toEqual([WHOLE]);
+
+        address = 'second.jpg';
+        image.dispatchEvent(new Event('load'));
+        await wait(80);
+        expect(settles).toEqual([WHOLE, WHOLE]);
+        // A late `load` for the picture that is already shown is not news.
+        image.dispatchEvent(new Event('load'));
+        await wait(80);
+        expect(settles.length).toBe(2);
+    });
+
+    it('settleDelay can be 0, and must not be negative', async () => {
+        const { editor, settles, log } = watched({ settleDelay: 0 });
+        await wait(20);
+        expect(settles).toEqual([WHOLE]);
+        editor.zoomBy(2);
+        await wait(20);
+        expect(settles.length).toBe(2);
+        editor.setOptions({ settleDelay: -5 });
+        expect(log).toEqual(['error: option "settleDelay" must be a number of milliseconds, 0 or more']);
+        expect(editor.getOptions().settleDelay).toBe(0);
+    });
+
+    it('nothing is reported once the editor is destroyed', async () => {
+        const { editor, changes, settles } = watched();
+        editor.zoomBy(2);
+        editor.destroy();
+        await wait(80);
+        expect([changes, settles]).toEqual([[], []]);
+    });
+
+    it('an editor that is not laid out yet reports its first view when it is', async () => {
+        const { editor, svg, changes, settles } = watched({}, { viewBox: '0 0 1600 1200', box: null });
+        await wait(80);
+        expect([changes, settles]).toEqual([[], []]);
+        setBox(svg, HALF.box);
+        editor.refresh();
+        await wait(80);
+        expect(changes).toEqual([WHOLE]);
+        expect(settles).toEqual([WHOLE]);
     });
 });
 
