@@ -5,6 +5,13 @@ All notable changes to MarkinJS will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- An `<img>` sized with `height: 100%` (for example `width: 100%; height: 100%; object-fit: contain` in a box of a
+  fixed size) lost its height when the editor wrapped it, took its own shape and overflowed the box. The wrappers
+  now pass the height on. The same happened in 0.2.0.
+
 ## [0.3.0] - 2026-11-11
 
 Zoom and pan are built in. The data format, the methods and the events of 0.2 are unchanged; "Upgrading from 0.2"
