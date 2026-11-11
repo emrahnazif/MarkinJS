@@ -775,6 +775,7 @@ const MarkinJS = (function () {
             this.hoverFrame = 0;
             this.hoverEvent = null;
             this.wheelRun = null; // the wheel movement in progress: when it was last heard, and whether it is ours
+            this.pinch = null; // a WebKit pinch in progress: the scale it began at, and where
             this.warnedBounds = false;
 
             this._build();
@@ -816,7 +817,16 @@ const MarkinJS = (function () {
             ];
             // Zoom and pan are listened for on the viewport, which is there whatever the picture is
             // moved to, and also hears what happens over the image while the editor is disabled.
-            if (this.viewport) this.cleanup.push(on(this.viewport, 'wheel', '_onWheel', { passive: false }));
+            if (this.viewport) {
+                const vp = this.viewport;
+                this.cleanup.push(
+                    on(vp, 'wheel', '_onWheel', { passive: false }),
+                    // WebKit's own events for a trackpad pinch. Other browsers never send them.
+                    on(vp, 'gesturestart', '_onPinch', { passive: false }),
+                    on(vp, 'gesturechange', '_onPinch', { passive: false }),
+                    on(vp, 'gestureend', '_onPinch', { passive: false })
+                );
+            }
             // Over an image, the overlay is resized by the image's own observer, which also refreshes
             // the editor. A second observer here would only chase the first one.
             const Observer = this.win.ResizeObserver;
@@ -1407,6 +1417,26 @@ const MarkinJS = (function () {
             }
             if (first && moved) run.ours = true;
             if (run.ours) event.preventDefault();
+        }
+
+        // A trackpad pinch in WebKit (Safari, and the web views built on it). `event.scale` is how
+        // far the fingers have moved apart since the pinch began. Prevented, or the whole page zooms.
+        _onPinch(event) {
+            if (!this._pans()) return;
+            event.preventDefault();
+            if (event.type === 'gestureend') {
+                this.pinch = null;
+                return;
+            }
+            const at = (n, fallback) => (isNum(n) ? n : fallback);
+            if (event.type === 'gesturestart' || !this.pinch) {
+                this.pinch = { scale: this.view.scale, x: at(event.clientX, 0), y: at(event.clientY, 0) };
+                if (event.type === 'gesturestart') return;
+            }
+            if (!(isNum(event.scale) && event.scale > 0)) return;
+            // The pointer does not move during a pinch, but the event that says where it is may not either.
+            const p = this.pinch;
+            this._zoomAt(p.scale * event.scale, at(event.clientX, p.x), at(event.clientY, p.y));
         }
 
         // ---- model

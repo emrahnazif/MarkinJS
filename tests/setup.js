@@ -198,6 +198,15 @@ export function wheel(target, x, y, init = {}) {
     return event;
 }
 
+// A trackpad pinch as WebKit reports it: gesturestart, gesturechange and gestureend, with the
+// distance between the fingers as a `scale` that starts at 1. jsdom has no GestureEvent.
+export function gesture(type, target, x, y, scale) {
+    const event = new Event(type, { bubbles: true, cancelable: true, composed: true });
+    Object.assign(event, { clientX: x, clientY: y, scale });
+    target.dispatchEvent(event);
+    return event;
+}
+
 // ---- keyboard
 
 export function key(name, init = {}, target = document.body) {

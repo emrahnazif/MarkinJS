@@ -1,5 +1,18 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { MarkinJS, makeEditor, track, setBox, screenOf, wheel, press, move, release, bboxEl, SVG_NS } from './setup.js';
+import {
+    MarkinJS,
+    makeEditor,
+    track,
+    setBox,
+    screenOf,
+    wheel,
+    gesture,
+    press,
+    move,
+    release,
+    bboxEl,
+    SVG_NS
+} from './setup.js';
 
 // A 1600 x 1200 image shown at 800 x 600, 20px from the top-left of the page.
 const HALF = { viewBox: '0 0 1600 1200', box: { left: 20, top: 20, width: 800, height: 600 } };
@@ -89,6 +102,55 @@ describe('pinch and Ctrl / Cmd + wheel', () => {
         expect(held[0]).toBeCloseTo(780, 2);
         expect(held[1]).toBeCloseTo(540, 2);
         release(x + 40, y + 20);
+    });
+});
+
+describe('a trackpad pinch in WebKit', () => {
+    it('zooms towards the pointer by as much as the fingers moved apart', () => {
+        const { editor, svg } = clocked();
+        const under = editor.toImage(220, 170);
+        expect(gesture('gesturestart', svg, 220, 170, 1).defaultPrevented).toBe(true);
+        for (const scale of [1.2, 1.9, 3, 2.5]) {
+            expect(gesture('gesturechange', svg, 220, 170, scale).defaultPrevented).toBe(true);
+            // The scale counts from where the pinch began, not from the event before.
+            expect(editor.getView().scale).toBeCloseTo(0.5 * scale, 5);
+            near(editor.toImage(220, 170), under.x, under.y);
+        }
+        expect(gesture('gestureend', svg, 220, 170, 2.5).defaultPrevented).toBe(true);
+
+        // The next pinch starts from the view as it is now.
+        gesture('gesturestart', svg, 220, 170, 1);
+        gesture('gesturechange', svg, 220, 170, 2);
+        expect(editor.getView().scale).toBeCloseTo(2.5, 5);
+        gesture('gestureend', svg, 220, 170, 2);
+    });
+
+    it('stops at the limits and is still taken there', () => {
+        const { editor, svg } = clocked({ maxScale: 4 });
+        gesture('gesturestart', svg, 420, 320, 1);
+        expect(gesture('gesturechange', svg, 420, 320, 0.3).defaultPrevented).toBe(true);
+        expect(editor.getView()).toEqual(WHOLE);
+        gesture('gesturechange', svg, 420, 320, 500);
+        expect(editor.getView().scale).toBe(4);
+        gesture('gestureend', svg, 420, 320, 500);
+    });
+
+    it('copes with a pinch whose start was not seen, or that carries no position', () => {
+        const { editor, svg } = clocked();
+        const event = new Event('gesturechange', { bubbles: true, cancelable: true });
+        event.scale = 2;
+        svg.dispatchEvent(event);
+        expect(editor.getView().scale).toBe(1);
+        const broken = new Event('gesturechange', { bubbles: true, cancelable: true });
+        expect(() => svg.dispatchEvent(broken)).not.toThrow();
+        expect(editor.getView().scale).toBe(1);
+    });
+
+    it('is left alone with zoomControls: false', () => {
+        const { editor, svg } = clocked({ zoomControls: false });
+        expect(gesture('gesturestart', svg, 420, 320, 1).defaultPrevented).toBe(false);
+        expect(gesture('gesturechange', svg, 420, 320, 2).defaultPrevented).toBe(false);
+        expect(editor.getView()).toEqual(WHOLE);
     });
 });
 
