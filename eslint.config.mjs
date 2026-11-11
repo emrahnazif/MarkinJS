@@ -18,7 +18,8 @@ export default [
         rules: {
             ...eslintConfigPrettier.rules,
             'prettier/prettier': 'error',
-            'no-unused-vars': 'warn',
+            // markin.js is a classic script: `MarkinJS` is its global, and the build adds the export.
+            'no-unused-vars': ['warn', { varsIgnorePattern: '^MarkinJS$' }],
             'no-console': 'warn'
         }
     }
