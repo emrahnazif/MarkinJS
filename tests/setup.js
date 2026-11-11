@@ -35,6 +35,10 @@ export const SVG_NS = 'http://www.w3.org/2000/svg';
 // The fixtures most tests start from.
 export const BOX = { id: 'A', class_id: 1, bbox: [100, 100, 200, 100] };
 export const OTHER = { id: 'B', bbox: [400, 300, 100, 100] };
+// A 1600 x 1200 image shown at 800 x 600, 20px from the top-left of the page: at rest one image
+// pixel is half a pixel on screen, and the view is the whole image.
+export const HALF = { viewBox: '0 0 1600 1200', box: { left: 20, top: 20, width: 800, height: 600 } };
+export const WHOLE = { x: 0, y: 0, width: 1600, height: 1200, scale: 0.5 };
 
 // jsdom does no layout, so the tests supply it. A test gives an element its box with setBox();
 // the viewport and stage the library builds around an <svg> take the box of that <svg>. A CSS
@@ -55,7 +59,10 @@ function ownBox(el) {
 function transformOf(el) {
     const text = (el.style && el.style.transform) || '';
     const found = /translate\(\s*([-\d.e+]+)px,\s*([-\d.e+]+)px\)\s*scale\(\s*([-\d.e+]+)\s*\)/.exec(text);
-    return found ? { x: Number(found[1]), y: Number(found[2]), scale: Number(found[3]) } : null;
+    if (!found) return null;
+    // CSS scales about the middle of an element unless transform-origin says otherwise.
+    const corner = /^0(px)?\s+0(px)?$/.test((el.style.transformOrigin || '').trim());
+    return { x: Number(found[1]), y: Number(found[2]), scale: Number(found[3]), about: corner ? 0 : 0.5 };
 }
 
 function layoutRect() {
@@ -64,10 +71,12 @@ function layoutRect() {
     let { left, top, width, height } = box;
     for (let el = this; el && el.nodeType === 1; el = el.parentNode) {
         const t = transformOf(el);
-        const origin = t && ownBox(el);
-        if (!origin) continue;
-        left = origin.left + t.x + (left - origin.left) * t.scale;
-        top = origin.top + t.y + (top - origin.top) * t.scale;
+        const box = t && ownBox(el);
+        if (!box) continue;
+        const ox = box.left + box.width * t.about;
+        const oy = box.top + box.height * t.about;
+        left = ox + t.x + (left - ox) * t.scale;
+        top = oy + t.y + (top - oy) * t.scale;
         width *= t.scale;
         height *= t.scale;
     }
@@ -97,15 +106,75 @@ function screenCTM() {
 }
 window.SVGSVGElement.prototype.getScreenCTM = screenCTM;
 
+// jsdom knows nothing of the size or position CSS gives an element either. A test says what the
+// computed style of one element is, until the test ends.
+const styles = new Map();
+const computedStyle = window.getComputedStyle;
+window.getComputedStyle = (el, ...rest) => styles.get(el) || computedStyle.call(window, el, ...rest);
+export function setStyle(el, style) {
+    styles.set(el, style);
+}
+
 // An <svg> in the page. The on-screen box is supplied here: by default one viewBox unit is one
 // screen pixel, starting at the top-left of the viewport.
-export function makeSvg({ viewBox = '0 0 800 600', box = { left: 0, top: 0, width: 800, height: 600 } } = {}) {
+export function makeSvg({
+    viewBox = '0 0 800 600',
+    box = { left: 0, top: 0, width: 800, height: 600 },
+    style = null
+} = {}) {
     const svg = document.createElementNS(SVG_NS, 'svg');
     if (viewBox) svg.setAttribute('viewBox', viewBox);
     if (box) setBox(svg, box);
+    if (style) setStyle(svg, style);
     document.body.appendChild(svg);
     return svg;
 }
+
+// An <svg> that the page positioned over something else: the library leaves it where it is, and
+// its editor has no viewport.
+export const LAID_OVER = { style: { position: 'absolute' } };
+
+// An <img> in the page, between two other elements, whose natural size can be changed as when
+// `src` is swapped for the next image: load(width, height).
+export function makeImage({ width = 1280, height = 853 } = {}) {
+    const holder = document.createElement('div');
+    holder.id = 'holder';
+    const before = document.createElement('span');
+    const image = document.createElement('img');
+    const after = document.createElement('span');
+    image.id = 'photo';
+    const size = { width, height };
+    Object.defineProperty(image, 'naturalWidth', { get: () => size.width });
+    Object.defineProperty(image, 'naturalHeight', { get: () => size.height });
+    holder.append(before, image, after);
+    document.body.appendChild(holder);
+    const load = (w, h) => {
+        size.width = w;
+        size.height = h;
+        image.dispatchEvent(new Event('load'));
+    };
+    return { holder, image, before, after, load };
+}
+
+// The page's own markup around an <svg>: a <section>, which is the viewport, holding a stage the
+// page marked, and whatever `extra` the page puts next to it. `viewport` and `picture` are the
+// boxes of the two on screen.
+export function makeStage({ viewBox = '0 0 800 600', viewport, picture, extra = '', prepare, options } = {}) {
+    const section = document.createElement('section');
+    section.innerHTML = `<div data-markin-stage><svg viewBox="${viewBox}"></svg></div>${extra}`;
+    const stage = section.firstChild;
+    const svg = stage.firstChild;
+    if (prepare) prepare(section, stage);
+    document.body.appendChild(section);
+    setBox(section, viewport);
+    setBox(stage, picture);
+    setBox(svg, picture);
+    const editor = track(MarkinJS.create(svg, { silent: true, ...options }));
+    return { editor, viewport: section, stage, svg };
+}
+
+// The stage inside the viewport of an editor: the element the library zooms.
+export const stageOf = (editor) => editor.getContainerElement().firstChild;
 
 // Give an element its box on screen, before any zoom.
 export function setBox(el, { left = 0, top = 0, width, height }) {
@@ -134,6 +203,7 @@ export function track(editor) {
 export function cleanup() {
     while (editors.length) editors.pop().destroy();
     document.body.innerHTML = '';
+    styles.clear();
 }
 afterEach(cleanup);
 
@@ -234,4 +304,5 @@ export const handleEl = (svg, name, index) =>
     );
 export const handles = (svg) => Array.from(svg.querySelectorAll('.markin-ui [data-markin-handle]'));
 export const num = (el, name) => parseFloat(el.getAttribute(name));
-export const nextFrame = () => new Promise((resolve) => setTimeout(resolve, 40));
+export const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+export const nextFrame = () => wait(40);
