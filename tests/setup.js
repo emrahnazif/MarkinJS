@@ -40,17 +40,27 @@ export const OTHER = { id: 'B', bbox: [400, 300, 100, 100] };
 export const HALF = { viewBox: '0 0 1600 1200', box: { left: 20, top: 20, width: 800, height: 600 } };
 export const WHOLE = { x: 0, y: 0, width: 1600, height: 1200, scale: 0.5 };
 
-// jsdom does no layout, so the tests supply it. A test gives an element its box with setBox();
-// the viewport and stage the library builds around an <svg> take the box of that <svg>. A CSS
-// transform the library writes on an element (translate and scale about its top-left corner)
-// moves the boxes of everything inside it, as it would in a browser.
+// jsdom does no layout, so the tests supply it. A test gives an element its box with setBox(); the
+// viewport and stage the library builds around an image, and the image itself, take the box of
+// the <svg> laid over it. From there the page is modelled as a browser would lay it out: an <svg>
+// the library gives a place and a size in pixels lies there inside its parent, and a CSS transform
+// on an element moves and scales its box and those of everything inside it.
 const boxes = new WeakMap();
 const NO_BOX = { left: 0, top: 0, width: 0, height: 0, x: 0, y: 0, right: 0, bottom: 0 };
+const pixels = (value) => (/px$/.test(value || '') ? parseFloat(value) : null);
 
 function ownBox(el) {
+    if (el.localName === 'svg' && el.parentNode && el.parentNode.nodeType === 1) {
+        // Placed and sized in pixels: that is where it lies, counted from the corner of its parent.
+        const [left, top, width, height] = ['left', 'top', 'width', 'height'].map((side) => pixels(el.style[side]));
+        const placed = left !== null && top !== null && width !== null && height !== null;
+        const parent = placed ? ownBox(el.parentNode) : null;
+        if (parent) return { left: parent.left + left, top: parent.top + top, width, height };
+    }
     if (boxes.has(el)) return boxes.get(el);
-    if (el.classList && (el.classList.contains('markin-container') || el.classList.contains('markin-stage'))) {
-        const svg = el.querySelector('svg');
+    const wrapper = el.closest ? el.closest('.markin-container') : null;
+    if (wrapper && (el === wrapper || el.classList.contains('markin-stage') || el.localName === 'img')) {
+        const svg = wrapper.querySelector('svg');
         return (svg && boxes.get(svg)) || null;
     }
     return null;
@@ -157,23 +167,22 @@ export function makeImage({ width = 1280, height = 853 } = {}) {
 }
 
 // The page's own markup around an <svg>: a <section>, which is the viewport, holding a stage the
-// page marked, and whatever `extra` the page puts next to it. `viewport` and `picture` are the
-// boxes of the two on screen.
+// page marked, and whatever `extra` the page puts next to it. In the stage are the picture, an
+// <img>, and the <svg> over it. `viewport` and `picture` are their boxes on screen.
 export function makeStage({ viewBox = '0 0 800 600', viewport, picture, extra = '', prepare, options } = {}) {
     const section = document.createElement('section');
-    section.innerHTML = `<div data-markin-stage><svg viewBox="${viewBox}"></svg></div>${extra}`;
+    section.innerHTML = `<div data-markin-stage><img alt=""><svg viewBox="${viewBox}"></svg></div>${extra}`;
     const stage = section.firstChild;
-    const svg = stage.firstChild;
-    if (prepare) prepare(section, stage);
+    const [image, svg] = stage.children;
+    if (prepare) prepare(section, stage, image);
     document.body.appendChild(section);
     setBox(section, viewport);
-    setBox(stage, picture);
-    setBox(svg, picture);
+    for (const el of [stage, image, svg]) setBox(el, picture);
     const editor = track(MarkinJS.create(svg, { silent: true, ...options }));
-    return { editor, viewport: section, stage, svg };
+    return { editor, viewport: section, stage, image, svg };
 }
 
-// The stage inside the viewport of an editor: the element the library zooms.
+// The stage inside the viewport of an editor: what holds the picture and the <svg> over it.
 export const stageOf = (editor) => editor.getContainerElement().firstChild;
 
 // Give an element its box on screen, before any zoom.

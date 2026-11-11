@@ -319,28 +319,30 @@ describe('an editor on an <svg>', () => {
         document.body.appendChild(holder);
         return { holder, svg: holder.querySelector('svg'), html: holder.innerHTML };
     }
-    it('wraps the <svg> in a viewport and a stage, and destroy puts the page back', () => {
-        const { holder, svg, html } = page('<b></b><svg viewBox="0 0 800 600"></svg><i></i>');
+    it('leaves the <svg> where it is: it is its own viewport, and only its viewBox changes', () => {
+        const { holder, svg, html } = page(
+            '<b></b><svg viewBox="0 0 800 600" preserveAspectRatio="xMinYMin"></svg><i></i>'
+        );
+        setBox(svg, { left: 0, top: 0, width: 800, height: 600 });
         const { editor, log } = makeEditor({ annotations: [BOX] }, svg);
-        const viewport = editor.getContainerElement();
-
-        expect(viewport.className).toBe('markin-container');
-        expect(viewport.parentNode).toBe(holder);
-        expect(viewport.previousSibling.localName).toBe('b');
-        expect(stageOf(editor).className).toBe('markin-stage');
-        expect(Array.from(stageOf(editor).children)).toEqual([svg]);
-        // An <svg> is inline unless the page says otherwise, and so is what stands in for it.
-        expect(viewport.style.display).toBe('inline-block');
+        expect(svg.parentNode).toBe(holder);
+        expect(holder.querySelector('.markin-container')).toBe(null);
+        expect(editor.getContainerElement()).toBe(null);
         expect(log).toEqual([]);
+
+        editor.zoomBy(2);
+        expect(editor.getView()).toEqual({ x: 200, y: 150, width: 400, height: 300, scale: 2 });
+        expect([svg.getAttribute('viewBox'), svg.getAttribute('preserveAspectRatio')]).toEqual([
+            '200 150 400 300',
+            'none'
+        ]);
+        expect(svg.style.overflow).toBe('hidden');
+        expect(svg.style.transform).toBe('');
+        // The image is still the whole of it: that is what annotations stay inside and are counted in.
+        expect(editor.getAnnotations({ normalize: true })[0].bbox).toEqual([0.125, 100 / 600, 0.25, 100 / 600]);
 
         editor.destroy();
         expect(holder.innerHTML).toBe(html);
-    });
-
-    it('wraps a block-level <svg> in a block', () => {
-        const { svg } = page('<svg viewBox="0 0 800 600" style="display: block"></svg>');
-        const editor = track(MarkinJS.create(svg, { silent: true }));
-        expect(editor.getContainerElement().style.display).toBe('block');
     });
 
     it('uses the stage the page marked, and leaves the markup alone', () => {
@@ -371,45 +373,32 @@ describe('an editor on an <svg>', () => {
         expect(editor.getAnnotations()).toEqual([BOX]);
     });
 
-    it('undoes the wrapping when it would resize the <svg>', () => {
-        // An <svg> sized by its parent: 600px wide there, 150px inside a wrapper, whatever the
-        // wrapper is given.
-        const { holder, svg } = page('<svg viewBox="0 0 800 600"></svg>');
-        svg.getBoundingClientRect = () => {
-            const width = svg.parentNode === holder ? 600 : 150;
-            return { left: 0, top: 0, width, height: 450 };
-        };
-        const { editor, log } = makeEditor({}, svg);
-        expect(svg.parentNode).toBe(holder);
-        expect(holder.querySelector('.markin-container')).toBe(null);
-        expect(editor.getContainerElement()).toBe(null);
-        expect(log.length).toBe(1);
-        expect(log[0]).toMatch(/^warn: zoom and pan are off/);
+    it('a second create on the same <svg> starts from the viewBox the page gave it', () => {
+        const { svg } = page('<svg viewBox="0 0 800 600"></svg>');
+        setBox(svg, { left: 0, top: 0, width: 800, height: 600 });
+        const first = makeEditor({}, svg).editor;
+        first.zoomBy(4);
+        expect(svg.getAttribute('viewBox')).toBe('300 225 200 150');
+        const second = makeEditor({}, svg).editor;
+        expect(svg.getAttribute('viewBox')).toBe('0 0 800 600');
+        expect(second.getView()).toEqual({ x: 0, y: 0, width: 800, height: 600, scale: 1 });
+        expect(first.getView()).toBe(null);
     });
 
-    it('gives the wrapper the full size when that is what keeps a percentage-sized <svg> as it was', () => {
-        const { holder, svg } = page('<svg viewBox="0 0 800 600"></svg>');
-        svg.getBoundingClientRect = () => {
-            const viewport = svg.closest('.markin-container');
-            const fits = !viewport || (viewport.style.width === '100%' && viewport.style.height === '100%');
-            return { left: 0, top: 0, width: fits ? 600 : 150, height: fits ? 450 : 150 };
-        };
-        const { editor, log } = makeEditor({}, svg);
-        const viewport = editor.getContainerElement();
-        expect(viewport.parentNode).toBe(holder);
-        expect([viewport.style.width, viewport.style.height, stageOf(editor).style.height]).toEqual([
-            '100%',
-            '100%',
-            '100%'
+    it('takes another viewBox that the page puts on a zoomed <svg> as another picture', () => {
+        const { svg } = page('<svg viewBox="0 0 800 600" preserveAspectRatio="xMaxYMax"></svg>');
+        setBox(svg, { left: 0, top: 0, width: 800, height: 600 });
+        const { editor } = makeEditor({ annotations: [BOX] }, svg);
+        editor.zoomBy(4);
+        // The page shows its next image, as it did before there was zoom.
+        svg.setAttribute('viewBox', '0 0 1600 1200');
+        expect(editor.getView()).toEqual({ x: 0, y: 0, width: 1600, height: 1200, scale: 0.5 });
+        expect([svg.getAttribute('viewBox'), svg.getAttribute('preserveAspectRatio')]).toEqual([
+            '0 0 1600 1200',
+            'xMaxYMax'
         ]);
-        expect(log).toEqual([]);
-    });
-
-    it('a second create on the same <svg> wraps it once', () => {
-        const { holder, svg } = page('<svg viewBox="0 0 800 600"></svg>');
-        track(MarkinJS.create(svg, { silent: true }));
-        const second = track(MarkinJS.create(svg, { silent: true }));
-        expect(holder.querySelectorAll('.markin-container').length).toBe(1);
-        expect(second.getContainerElement().parentNode).toBe(holder);
+        expect(svg.style.overflow).toBe('');
+        editor.zoomBy(2);
+        expect(editor.getView()).toEqual({ x: 400, y: 300, width: 800, height: 600, scale: 1 });
     });
 });

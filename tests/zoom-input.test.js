@@ -5,7 +5,6 @@ import {
     makeImage,
     track,
     setBox,
-    stageOf,
     screenOf,
     wheel,
     gesture,
@@ -287,7 +286,8 @@ describe('dragging the view', () => {
         }
         return made;
     }
-    const viewport = (editor) => editor.getContainerElement();
+    // The window onto the image: the viewport around an image, or else the <svg> itself.
+    const viewport = (editor) => editor.getContainerElement() || editor.getSVGElement();
     // Hold Space with the pointer over the editor.
     const holdSpace = (svg) => {
         pointer('pointermove', svg, 100, 100, { buttons: 0 });
@@ -324,11 +324,11 @@ describe('dragging the view', () => {
             const { editor, svg } = zoomed();
             press(svg, 100, 100);
             move(5000, 5000);
-            expect(stageOf(editor).style.transform).toBe('translate(12px, 12px) scale(4)');
+            expect(svg.getAttribute('viewBox')).toBe('-6 -6 400 300');
             expect(editor.getView()).toEqual({ x: 0, y: 0, width: 394, height: 294, scale: 2 });
             // Coming back, the view follows at once.
             move(4990, 4990);
-            expect(stageOf(editor).style.transform).toBe('translate(2px, 2px) scale(4)');
+            expect(svg.getAttribute('viewBox')).toBe('-1 -1 400 300');
             release(4990, 4990);
         });
 
@@ -698,7 +698,9 @@ describe('stepping through the annotations', () => {
         editor.step(1);
         // 40 x 20 image pixels in 720 x 520 on screen.
         expect(editor.getView().scale).toBe(18);
-        expect(editor.toClient(1420, 1010)).toEqual({ x: 420, y: 320 });
+        const middle = editor.toClient(1420, 1010);
+        expect(middle.x).toBeCloseTo(420, 6);
+        expect(middle.y).toBeCloseTo(320, 6);
         editor.step(1);
         expect(editor.getView().scale).toBe(13);
         editor.step(1);

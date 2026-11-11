@@ -30,29 +30,34 @@ import {
     LAID_OVER
 } from './setup.js';
 
-// What the library wrote on the page for the current view.
-const written = (editor) => ({
-    transform: stageOf(editor).style.transform,
-    overflow: editor.getContainerElement().style.overflow
-});
+// What the library wrote on the page for the current view: the part of the image the <svg> draws,
+// and whether the window onto it clips. The window is the viewport, or else the <svg> itself.
+const written = (editor) => {
+    const svg = editor.getSVGElement();
+    return {
+        viewBox: svg.getAttribute('viewBox'),
+        clips: (editor.getContainerElement() || svg).style.overflow === 'hidden'
+    };
+};
+const AT_REST = { viewBox: '0 0 1600 1200', clips: false };
 
 describe('the view at rest', () => {
     it('is the whole image, with nothing written on the page', () => {
         const { editor } = makeEditor({}, HALF);
         expect(editor.getView()).toEqual(WHOLE);
-        expect(written(editor)).toEqual({ transform: '', overflow: '' });
+        expect(written(editor)).toEqual(AT_REST);
     });
 
     it('cannot be zoomed out of, and fit() returns to it', () => {
         const { editor } = makeEditor({}, HALF);
         expect(editor.zoomBy(0.25)).toBe(true);
-        expect(written(editor)).toEqual({ transform: '', overflow: '' });
+        expect(written(editor)).toEqual(AT_REST);
 
         editor.zoomBy(3);
-        expect(written(editor).overflow).toBe('hidden');
+        expect(written(editor).clips).toBe(true);
         expect(editor.fit()).toBe(true);
         expect(editor.getView()).toEqual(WHOLE);
-        expect(written(editor)).toEqual({ transform: '', overflow: '' });
+        expect(written(editor)).toEqual(AT_REST);
     });
 });
 
@@ -61,7 +66,7 @@ describe('zoomBy', () => {
         const { editor } = makeEditor({}, HALF);
         editor.zoomBy(2);
         expect(editor.getView()).toEqual({ x: 400, y: 300, width: 800, height: 600, scale: 1 });
-        expect(written(editor)).toEqual({ transform: 'translate(-400px, -300px) scale(2)', overflow: 'hidden' });
+        expect(written(editor)).toEqual({ viewBox: '400 300 800 600', clips: true });
         editor.zoomBy(2);
         expect(editor.getView()).toEqual({ x: 600, y: 450, width: 400, height: 300, scale: 2 });
     });
@@ -104,7 +109,7 @@ describe('zoomBy', () => {
         const { editor } = makeEditor({ maxScale: 4 }, tiny);
         editor.zoomBy(2);
         expect(editor.getView()).toEqual({ x: 0, y: 0, width: 100, height: 100, scale: 8 });
-        expect(written(editor).transform).toBe('');
+        expect(written(editor)).toEqual({ viewBox: '0 0 100 100', clips: false });
     });
 
     it('rejects a factor or a point that makes no sense', () => {
@@ -112,7 +117,7 @@ describe('zoomBy', () => {
         expect(editor.zoomBy(0)).toBe(false);
         expect(editor.zoomBy('2')).toBe(false);
         expect(editor.zoomBy(2, { x: 1 })).toBe(false);
-        expect(written(editor).transform).toBe('');
+        expect(written(editor)).toEqual(AT_REST);
         expect(log.length).toBe(3);
         expect(log[0]).toMatch(/^error: zoomBy: the factor/);
         expect(() => makeEditor({ strict: true }).editor.zoomBy(-1)).toThrow(TypeError);
@@ -153,7 +158,7 @@ describe('setView', () => {
         const { editor } = makeEditor({}, HALF);
         expect(editor.setView({ x: 400, y: 300, width: 400, height: 300 })).toBe(true);
         expect(editor.getView()).toEqual({ x: 400, y: 300, width: 400, height: 300, scale: 2 });
-        expect(written(editor).transform).toBe('translate(-800px, -600px) scale(4)');
+        expect(written(editor).viewBox).toBe('400 300 400 300');
     });
 
     it('shows at least a rectangle of other proportions, centred', () => {
@@ -172,7 +177,7 @@ describe('setView', () => {
 
         // A rectangle that reaches outside the image: the view stops a handle's width past the edge.
         editor.setView({ x: -500, y: -500, width: 800, height: 600 });
-        expect(written(editor).transform).toBe('translate(12px, 12px) scale(2)');
+        expect(written(editor).viewBox).toBe('-12 -12 800 600');
         expect(editor.getView()).toEqual({ x: 0, y: 0, width: 788, height: 588, scale: 1 });
     });
 
@@ -182,7 +187,7 @@ describe('setView', () => {
             expect(editor.setView(bad)).toBe(false);
         }
         expect(log.length).toBe(4);
-        expect(written(editor).transform).toBe('');
+        expect(written(editor)).toEqual(AT_REST);
     });
 });
 
@@ -215,8 +220,9 @@ describe('zoomTo', () => {
         expect(editor.zoomTo('box')).toBe(true);
         // 40 x 20 image pixels in the 720 x 520 that the padding leaves: 18 screen pixels each.
         expect(editor.getView().scale).toBe(18);
-        expect(editor.toClient(800, 600)).toEqual({ x: 420, y: 320 });
-        expect(editor.toClient(780, 590)).toEqual({ x: 60, y: 140 });
+        const middle = editor.toClient(800, 600);
+        const corner = editor.toClient(780, 590);
+        [middle.x, middle.y, corner.x, corner.y].forEach((n, i) => expect(n).toBeCloseTo([420, 320, 60, 140][i], 6));
     });
 
     it('takes the padding it is given', () => {
@@ -252,7 +258,7 @@ describe('zoomTo', () => {
         expect(editor.zoomTo('box', { padding: '10' })).toBe(false);
         expect(log.length).toBe(3);
         expect(log[0]).toMatch(/zoomTo: no annotation with id "nobody"/);
-        expect(written(editor).transform).toBe('');
+        expect(written(editor)).toEqual(AT_REST);
     });
 });
 
@@ -312,7 +318,7 @@ describe('the view and the page', () => {
         setBox(svg, { left: 20, top: 20, width: 400, height: 300 });
         editor.refresh();
         expect(editor.getView()).toEqual({ x: 400, y: 300, width: 800, height: 600, scale: 0.5 });
-        expect(written(editor).transform).toBe('translate(-200px, -150px) scale(2)');
+        expect(written(editor).viewBox).toBe('400 300 800 600');
     });
 
     it('keeps the middle in place when a resize also brings the limit down', () => {
@@ -332,6 +338,12 @@ describe('the view and the page', () => {
         setBox(editor.getSVGElement(), HALF.box);
         editor.zoomBy(2);
         expect(editor.getView()).toEqual({ x: 400, y: 300, width: 800, height: 600, scale: 1 });
+        // The image is moved and scaled; the overlay is not, it draws the visible part at screen size.
+        expect(image.style.transform).toBe('translate(-400px, -300px) scale(2)');
+        expect(image.style.transformOrigin).toBe('0 0');
+        expect(written(editor)).toEqual({ viewBox: '400 300 800 600', clips: true });
+        expect(stageOf(editor).style.transform).toBe('');
+        expect(editor.getSVGElement().style.transform).toBe('');
 
         // The browser reports the load of an image it already had: the same picture, the same view.
         load(1600, 1200);
@@ -339,7 +351,8 @@ describe('the view and the page', () => {
 
         load(800, 600);
         expect(editor.getView()).toEqual({ x: 0, y: 0, width: 800, height: 600, scale: 1 });
-        expect(written(editor)).toEqual({ transform: '', overflow: '' });
+        expect(written(editor)).toEqual({ viewBox: '0 0 800 600', clips: false });
+        expect(image.style.transform).toBe('');
     });
 
     it('zooms an <svg> that has no viewBox, in its own pixels', () => {
@@ -541,36 +554,67 @@ describe('a stage the page marked', () => {
         });
 
     it('grows a picture that is smaller than the viewport from where it stands', () => {
-        const { editor, stage, viewport } = centred();
+        const { editor, stage, image, svg, viewport } = centred();
         expect(editor.getView()).toEqual({ x: 0, y: 0, width: 800, height: 600, scale: 1 });
         // 880 wide: still centred. 660 high: more than the viewport, so the middle is shown.
         editor.zoomBy(1.1);
-        expect(stage.style.transform).toBe('translate(-40px, -30px) scale(1.1)');
+        // The picture is moved and scaled. The stage and the <svg> are not: the <svg> is laid
+        // over all of the viewport and draws what is visible there.
+        expect(image.style.transform).toBe('translate(-40px, -30px) scale(1.1)');
+        expect(stage.style.transform).toBe('');
+        expect([svg.style.left, svg.style.top, svg.style.width, svg.style.height]).toEqual([
+            '-100px',
+            '0px',
+            '1000px',
+            '600px'
+        ]);
+        expect(svg.getAttribute('preserveAspectRatio')).toBe('none');
         expect(viewport.style.overflow).toBe('hidden');
         const view = editor.getView();
         expect([view.x, view.width]).toEqual([0, 800]);
+        // Both agree on where a point of the image is: 60px in, where the grown picture now starts.
+        expect(editor.toClient(0, 300).x).toBeCloseTo(60, 6);
 
         // 1600 wide: now it can be moved, and the view is a part of it.
         editor.fit();
         editor.zoomBy(2);
         expect(editor.getView()).toEqual({ x: 150, y: 150, width: 500, height: 300, scale: 2 });
+        expect(svg.getAttribute('viewBox')).toBe('150 150 500 300');
     });
 
-    it('gives the page its own styles back', () => {
-        const { editor, stage, viewport } = centred((v, s) => {
-            s.style.transform = 'rotate(0deg)';
+    it('gives the page its own styles and attributes back', () => {
+        const { editor, image, svg, viewport } = centred((v, s, picture) => {
+            picture.style.transform = 'rotate(0deg)';
             v.style.overflow = 'auto';
+            s.querySelector('svg').setAttribute('preserveAspectRatio', 'xMinYMin');
+            s.querySelector('svg').style.left = '0px';
         });
+        const page = () => [
+            image.style.transform,
+            viewport.style.overflow,
+            svg.getAttribute('viewBox'),
+            svg.getAttribute('preserveAspectRatio'),
+            svg.style.left,
+            svg.style.width,
+            svg.style.overflow
+        ];
+        const before = page();
+        expect(before).toEqual(['rotate(0deg)', 'auto', '0 0 800 600', 'xMinYMin', '0px', '', '']);
         editor.zoomBy(2);
-        expect(viewport.style.overflow).toBe('hidden');
-        expect(stage.style.transform).toBe('translate(-400px, -300px) scale(2)');
+        expect(page()).toEqual([
+            'translate(-400px, -300px) scale(2)',
+            'hidden',
+            '150 150 500 300',
+            'none',
+            '-100px',
+            '1000px',
+            'hidden'
+        ]);
         editor.fit();
-        expect(stage.style.transform).toBe('rotate(0deg)');
-        expect(viewport.style.overflow).toBe('auto');
+        expect(page()).toEqual(before);
         editor.zoomBy(2);
         editor.destroy();
-        expect(stage.style.transform).toBe('rotate(0deg)');
-        expect(viewport.style.overflow).toBe('auto');
+        expect(page()).toEqual(before);
     });
 });
 
