@@ -4,8 +4,8 @@ A lightweight, zero-dependency SVG annotation editor for computer vision and ima
 
 [![npm version](https://img.shields.io/npm/v/markinjs.svg)](https://www.npmjs.com/package/markinjs)
 [![npm downloads](https://img.shields.io/npm/dm/markinjs.svg)](https://www.npmjs.com/package/markinjs)
-[![GitHub stars](https://img.shields.io/github/stars/datamarkin/markinjs.svg)](https://github.com/datamarkin/markinjs)
-[![License](https://img.shields.io/npm/l/markinjs.svg)](https://github.com/datamarkin/markinjs/blob/main/LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/emrahnazif/MarkinJS.svg)](https://github.com/emrahnazif/MarkinJS)
+[![License](https://img.shields.io/npm/l/markinjs.svg)](https://github.com/emrahnazif/MarkinJS/blob/main/LICENSE)
 [![Bundle Size](https://img.shields.io/badge/bundle%20size-53KB%20min%20%2F%2018KB%20gzip-brightgreen.svg)](https://www.npmjs.com/package/markinjs)
 [![No Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)](https://www.npmjs.com/package/markinjs)
 
@@ -446,7 +446,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and contribution gu
 ## Support
 
 - **Website**: [markinjs.com](https://markinjs.com)
-- **Issues**: [GitHub Issues](https://github.com/datamarkin/markinjs/issues)
+- **Issues**: [GitHub Issues](https://github.com/emrahnazif/MarkinJS/issues)
 - **Contact**: markinjs@datamarkin.com
 
 ## License

@@ -7,7 +7,7 @@ Thank you for your interest in contributing to MarkinJS! This guide will help yo
 1. **Clone the repository**
 
 ```bash
-git clone https://github.com/datamarkin/markinjs.git
+git clone https://github.com/emrahnazif/MarkinJS.git
 cd markinjs
 ```
 
@@ -92,7 +92,7 @@ markinjs/
 
 ## Reporting Bugs
 
-Use [GitHub Issues](https://github.com/datamarkin/markinjs/issues) with the bug report template. Include:
+Use [GitHub Issues](https://github.com/emrahnazif/MarkinJS/issues) with the bug report template. Include:
 
 - Steps to reproduce
 - Expected vs actual behavior
@@ -101,7 +101,7 @@ Use [GitHub Issues](https://github.com/datamarkin/markinjs/issues) with the bug 
 
 ## Feature Requests
 
-Open a [GitHub Issue](https://github.com/datamarkin/markinjs/issues) with the feature request template. Describe:
+Open a [GitHub Issue](https://github.com/emrahnazif/MarkinJS/issues) with the feature request template. Describe:
 
 - The use case
 - Expected API/behavior

@@ -168,7 +168,7 @@ Have a great use case or example to share? We'd love to include it!
 ## Getting Help
 
 - 📧 **Questions**: markinjs@datamarkin.com
-- 🐛 **Issues**: [GitHub Issues](https://github.com/datamarkin/markinjs/issues)
+- 🐛 **Issues**: [GitHub Issues](https://github.com/emrahnazif/MarkinJS/issues)
 - 📖 **Documentation**: [README](../README.md) and [API page](./api.html)
 
 ## License

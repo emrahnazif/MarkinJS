@@ -38,7 +38,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/datamarkin/markinjs.git"
+    "url": "https://github.com/emrahnazif/MarkinJS.git"
   },
   "keywords": [
     "svg",
@@ -55,7 +55,7 @@
   "author": "Datamarkin <markinjs@datamarkin.com>",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/datamarkin/markinjs/issues"
+    "url": "https://github.com/emrahnazif/MarkinJS/issues"
   },
   "homepage": "https://markinjs.com",
   "engines": {
