@@ -169,27 +169,53 @@ describe('an editor over an <img>', () => {
         expect(inline.getContainerElement().style.display).toBe('inline-block');
     });
 
-    it('notices when wrapping changed the size of the image, and repairs or reports it', () => {
-        // An image with a percentage width: 600px in its parent, but only 200px inside a
-        // shrink-to-fit wrapper, unless that wrapper is given the full width.
-        const sized = (fixable) => {
+    describe('an image sized in percentages of the box around it', () => {
+        // jsdom lays nothing out, so each test says how big the image comes out: at its size on the
+        // page while it is not wrapped, and as `wrapped(viewport, stage)` says once it is.
+        function sized(page, wrapped) {
             const { image } = makeImage();
-            Object.defineProperty(image, 'offsetHeight', { get: () => 100 });
-            Object.defineProperty(image, 'offsetWidth', {
-                get() {
-                    const wrap = image.closest('.markin-container');
-                    return !wrap || (fixable && wrap.style.width === '100%') ? 600 : 200;
-                }
-            });
+            const size = () => {
+                const viewport = image.closest('.markin-container');
+                return viewport ? wrapped(viewport.style, viewport.firstChild.style) : page;
+            };
+            Object.defineProperty(image, 'offsetWidth', { get: () => size()[0] });
+            Object.defineProperty(image, 'offsetHeight', { get: () => size()[1] });
             const log = [];
             const editor = track(MarkinJS.create(image, { logger: (level, message) => log.push(message) }));
-            return { width: editor.getContainerElement().style.width, log };
-        };
-        expect(sized(true)).toEqual({ width: '100%', log: [] });
-        const broken = sized(false);
-        expect(broken.width).toBe('');
-        expect(broken.log.length).toBe(1);
-        expect(broken.log[0]).toMatch(/wrapping the image changed its size/);
+            const viewport = editor.getContainerElement().style;
+            return { given: [viewport.width, viewport.height, stageOf(editor).style.height], log };
+        }
+
+        it('keeps a percentage width by giving the viewport the full width', () => {
+            // 600px wide in its parent, but only 200px inside a shrink-to-fit wrapper.
+            const kept = sized([600, 100], (viewport) => [viewport.width === '100%' ? 600 : 200, 100]);
+            expect(kept).toEqual({ given: ['100%', '', ''], log: [] });
+        });
+
+        it('keeps a percentage height by passing it on through the viewport and the stage', () => {
+            // width: 100%; height: 100%; object-fit: contain, in a 600 x 300 box. Wrapped, the
+            // height has nothing to be a percentage of, and the image takes its own shape: 600 x 400.
+            const kept = sized([600, 300], (viewport, stage) => [
+                600,
+                viewport.height === '100%' && stage.height === '100%' ? 300 : 400
+            ]);
+            expect(kept).toEqual({ given: ['100%', '100%', '100%'], log: [] });
+        });
+
+        it('keeps both at once', () => {
+            const kept = sized([600, 300], (viewport, stage) => [
+                viewport.width === '100%' ? 600 : 200,
+                viewport.height === '100%' && stage.height === '100%' ? 300 : 133
+            ]);
+            expect(kept).toEqual({ given: ['100%', '100%', '100%'], log: [] });
+        });
+
+        it('leaves no trace of the attempt, and says so, when nothing keeps the size', () => {
+            const broken = sized([600, 300], () => [200, 133]);
+            expect(broken.given).toEqual(['', '', '']);
+            expect(broken.log.length).toBe(1);
+            expect(broken.log[0]).toMatch(/wrapping the image changed its size/);
+        });
     });
 
     describe('placing the overlay where the image is actually drawn', () => {

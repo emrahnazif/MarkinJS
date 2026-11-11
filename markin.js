@@ -622,13 +622,19 @@ const MarkinJS = (function () {
         const before = [image.offsetWidth, image.offsetHeight];
         const resized = () => image.offsetWidth !== before[0] || image.offsetHeight !== before[1];
         const { viewport: container, stage } = wrapInStage(subject, styleOf(image));
-        // Wrapping must not change how the image is laid out; a percentage width is the usual casualty.
+        // Wrapping must not change how the image is laid out. A size given as a percentage is the
+        // usual casualty: it has to find the same box to refer to, through the viewport and the
+        // stage. The width does by a viewport of the full width; the height needs both to pass it on.
+        if (resized()) container.style.width = '100%';
         if (resized()) {
-            container.style.width = '100%';
-            if (resized()) {
-                container.style.width = '';
-                note('wrapping the image changed its size on the page. Create the editor on your own <svg> instead.');
-            }
+            container.style.height = '100%';
+            stage.style.height = '100%';
+        }
+        if (resized()) {
+            container.style.width = '';
+            container.style.height = '';
+            stage.style.height = '';
+            note('wrapping the image changed its size on the page. Create the editor on your own <svg> instead.');
         }
         if (inPicture || image.hasAttribute('srcset')) {
             note(
