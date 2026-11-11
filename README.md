@@ -379,10 +379,11 @@ editor.destroy();
 The element marked `data-markin-stage` holds the picture and the `<svg>`, and its parent is the viewport. While
 the view is zoomed in, MarkinJS sets a transform on the picture (every child of the stage but the `<svg>`), lays
 the `<svg>` over the viewport with inline `left`, `top`, `width` and `height`, changes its `viewBox` and
-`preserveAspectRatio`, and sets `overflow: hidden` on the viewport. At rest and after `destroy()` all of that is
-as you rendered it, and nothing else in your markup is touched. Keep those attributes and styles out of state
-that is written again while the editor lives. The picture may be smaller than the viewport; it then stays where
-your layout put it and grows from there.
+`preserveAspectRatio`, and sets `overflow: hidden` on the viewport. Back at rest and after `destroy()` all of
+that is as it was when the view left rest, and nothing else in your markup is touched. Code that writes those
+attributes and styles again while the view is zoomed in undoes the view; a new `viewBox` in particular is taken
+as a new picture, which starts at rest. The picture may be smaller than the viewport; it then stays where your
+layout put it and grows from there.
 
 An `<svg>` that holds the whole picture itself (an `<image>`, or only shapes) needs none of this: it is its own
 viewport, and zooming changes its `viewBox` and nothing else.
