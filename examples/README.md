@@ -26,8 +26,8 @@ Comprehensive API reference with examples:
 
 1. **Choose an example** based on your use case
 2. **Open the HTML file** in your browser
-3. **Start annotating** - click, drag, and interact with the tools
-4. **Export your data** using the built-in export functions
+3. **Start editing** - click an annotation, then drag it, its corners, its vertices or its keypoints
+4. **Read the data** in the "Annotations" panel: it is what the `change` event hands to your app
 
 ## File Structure
 
@@ -77,7 +77,7 @@ All examples are self-contained and can be easily customized:
 ### For Computer Vision Research
 - Start with [Interactive Demo](./index.html)
 - Modify classes to match your dataset categories
-- Adapt export format for your ML framework
+- Convert the annotation list to the format your ML framework expects
 
 ### For Medical Imaging
 - Use [Interactive Demo](./index.html) as foundation
@@ -92,44 +92,66 @@ All examples are self-contained and can be easily customized:
 ## Integration Examples
 
 ### React Component
+
+When a framework owns the `<img>`, render the overlay SVG yourself and give MarkinJS the SVG.
+`destroy()` in the cleanup makes it safe under React Strict Mode.
+
 ```jsx
 import { useEffect, useRef } from 'react';
+import MarkinJS from 'markinjs';
 
-function AnnotationComponent({ imageUrl, onAnnotationChange }) {
-  const imageRef = useRef();
-  const annotatorRef = useRef();
+function AnnotationEditor({ imageUrl, width, height, annotations, onChange }) {
+  const svgRef = useRef(null);
 
   useEffect(() => {
-    if (window.MarkinJS && imageRef.current) {
-      annotatorRef.current = MarkinJS.createImageAnnotator(imageRef.current.id, {
-        keyboardControls: true
-      });
-      
-      annotatorRef.current.on('annotationcreated', onAnnotationChange);
-    }
-  }, []);
+    const editor = MarkinJS.create(svgRef.current, { annotations });
+    editor.on('change', onChange);
+    return () => editor.destroy();
+  }, [imageUrl]);
 
-  return <img ref={imageRef} id="annotation-target" src={imageUrl} />;
+  return (
+    <div style={{ position: 'relative', display: 'inline-block' }}>
+      <img src={imageUrl} alt="" />
+      <svg
+        ref={svgRef}
+        viewBox={`0 0 ${width} ${height}`}
+        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
+      />
+    </div>
+  );
 }
 ```
 
+`width` and `height` are the image's natural size in pixels.
+
 ### Vue Component
+
 ```vue
 <template>
-  <img ref="imageEl" :src="imageUrl" @load="initAnnotator" />
+  <div style="position: relative; display: inline-block">
+    <img :src="imageUrl" alt="" />
+    <svg
+      ref="overlay"
+      :viewBox="`0 0 ${width} ${height}`"
+      style="position: absolute; inset: 0; width: 100%; height: 100%"
+    />
+  </div>
 </template>
 
 <script>
+import MarkinJS from 'markinjs';
+
 export default {
-  props: ['imageUrl'],
-  methods: {
-    initAnnotator() {
-      this.annotator = MarkinJS.createImageAnnotator(this.$refs.imageEl.id, {
-        keyboardControls: true
-      });
-    }
+  props: ['imageUrl', 'width', 'height', 'annotations'],
+  emits: ['change'],
+  mounted() {
+    this.editor = MarkinJS.create(this.$refs.overlay, { annotations: this.annotations });
+    this.editor.on('change', (annotations) => this.$emit('change', annotations));
+  },
+  beforeUnmount() {
+    this.editor.destroy();
   }
-}
+};
 </script>
 ```
 
@@ -145,7 +167,7 @@ Have a great use case or example to share? We'd love to include it!
 
 - 📧 **Questions**: markinjs@datamarkin.com
 - 🐛 **Issues**: [GitHub Issues](https://github.com/datamarkin/markinjs/issues)
-- 📖 **Documentation**: [Main Docs](../docs/)
+- 📖 **Documentation**: [README](../README.md) and [API page](./api.html)
 
 ## License
 
