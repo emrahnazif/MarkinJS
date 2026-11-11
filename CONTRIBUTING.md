@@ -17,9 +17,9 @@ cd markinjs
 npm install
 ```
 
-3. **Run development server**
+3. **Try it in a browser**
 
-Open `examples/index.html` in your browser to test changes interactively.
+Open `examples/index.html` in your browser. It loads `markin.js` directly, so no build is needed.
 
 4. **Run tests**
 
@@ -37,9 +37,10 @@ npm run build
 
 ```
 markinjs/
-  markin.js          # Main source file
-  dist/              # Built output (IIFE, ESM, CJS, minified)
-  tests/             # Test files
+  markin.js          # Main source file (a classic script; the build adds the module export)
+  markin.d.ts        # Type definitions, written by hand - update them with the API
+  dist/              # Built output (IIFE, ESM, CJS, minified) - not committed
+  tests/             # Test files (vitest + jsdom, with simulated pointer and keyboard input)
   examples/          # Interactive demos
   package.json
   rollup.config.mjs  # Build configuration

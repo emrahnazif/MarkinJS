@@ -5,13 +5,48 @@ All notable changes to MarkinJS will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-11-10
+
+A rewrite of the library. The API is smaller and **not compatible with 0.1**; see
+"Migrating from 0.1" in the README.
+
+### Changed
+- Annotations are plain data owned by the editor. The SVG is drawn from that data and never read back,
+  so selection handles, undo snapshots and export can no longer corrupt each other.
+- One data format, the same in and out: `id`, `class_id`, `bbox: [x, y, width, height]`,
+  `segments: [[x, y], ...]`, `keypoints: [{ name, point, v }]`. Unknown fields are kept.
+- One entry point, `MarkinJS.create(svgOrImg, options)`, with `options.annotations` for the initial data.
+  Server-rendered annotation markup is no longer adopted.
+- One `change` event after every completed edit (including undo and redo), carrying the full list.
+- Pointer Events instead of mouse events: touch and pen work, a drag is captured, and it always ends.
+- Drags are computed from the position at press time, so limits never make a shape drift from the pointer.
+- Handles, keypoints and outlines are sized from the measured on-screen scale. `setZoom()` and the `zoom`
+  option are gone.
+- Keyboard shortcuts are ignored while typing in a field, limited to the editor used last, and a held
+  arrow key is one undo step.
+- Colours come from `options.colors` by `class_id`. Binding, containment, deletion rules and the skeleton
+  are editor options rather than per-annotation settings.
+- Tests run real pointer and keyboard interaction (265 tests).
 
 ### Added
-- TypeScript definitions (planned)
-- React/Vue component wrappers (planned)
-- Automated testing suite (planned)
-- Performance optimizations (planned)
+- `load()`, `clear()`, `select()`, `getSelection()`, `getAnnotation()`, `canUndo()`, `canRedo()`,
+  `setOptions()`, `refresh()`, `MarkinJS.normalize()`, `MarkinJS.denormalize()`.
+- `constrainToImage` (default on): annotations cannot be dragged out of the image.
+- Keypoint visibility `v` (0 not labelled, 1 occluded, 2 visible).
+- Escape cancels a drag; Ctrl + Y redoes.
+- `dist/markin-<version>.min.js`, a build with the version in its file name.
+
+### Fixed
+- The build (`npm run build` failed after the module export was removed from `markin.js`).
+- The package entry points: bundlers were handed the script-tag build, which has no exports.
+- Type definitions are now tracked in the repository and published.
+- Everything listed under "Changed" replaces behaviour that lost or corrupted data in 0.1: Backspace in
+  a text field deleting the selection, `updateAnnotation` wiping geometry, keypoints collapsing in small
+  boxes, undo restoring stale handles, a drag stuck after a listener threw, and others.
+
+### Removed
+- `createAnnotator`, `createImageAnnotator`, the `export*` methods, `setZoom`, `saveState`, the
+  per-feature setters, most events, and the options `zoom` and `autoResizeBbox`.
 
 ## [0.0.1] - 2025-01-19
 
