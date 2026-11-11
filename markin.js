@@ -1000,18 +1000,17 @@ const MarkinJS = (function () {
         // Record the current state as one undo step and tell the host.
         _commit(reason, ids) {
             const h = this.history;
-            if (reason === 'update') {
-                // An edit that ends where it began (a nudge there and back, a commit that an earlier
-                // one already covered) is not a step: put the earlier objects back and say nothing.
-                const top = h.states[h.index];
-                for (const id of ids) {
-                    const key = String(id);
-                    const now = this.byId.get(key);
-                    const was = top.find((ann) => String(ann.id) === key);
-                    if (now && was && now !== was && sameData(now, was)) this._set(was);
-                }
-                if (top.length === this.list.length && top.every((ann, i) => ann === this.list[i])) return;
+            // An edit that ends where it began (a nudge there and back) is not a step: put the earlier
+            // objects back and say nothing. Nor is one that an earlier commit already covers, as
+            // when a listener edited while this edit was still being announced.
+            const top = h.states[h.index];
+            for (const id of ids) {
+                const key = String(id);
+                const now = this.byId.get(key);
+                const was = now && top.find((ann) => String(ann.id) === key);
+                if (was && now !== was && sameData(now, was)) this._set(was);
             }
+            if (top.length === this.list.length && top.every((ann, i) => ann === this.list[i])) return;
             if (this.opts.historyEnabled) {
                 h.states.length = h.index + 1;
                 h.states.push(this.list.slice());
@@ -1106,9 +1105,15 @@ const MarkinJS = (function () {
             const ann = this._set(result.value);
             this._warnOutOfBounds([ann]);
             this._render(ann);
-            if (!isObject(settings) || settings.select !== false)
-                this._select(String(ann.id), this._mainPart(ann), null);
+            // Recorded and announced before it is selected: whatever a select listener does to the
+            // new annotation is then an edit of its own, made after this one.
             this._commit('create', [ann.id]);
+            // A change listener may have altered it by now, or removed it again.
+            const key = String(ann.id);
+            const current = this.byId.get(key);
+            if (current && (!isObject(settings) || settings.select !== false)) {
+                this._select(key, this._mainPart(current), null);
+            }
             return ann.id;
         }
 

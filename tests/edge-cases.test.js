@@ -213,6 +213,102 @@ describe('history at the edges', () => {
         expect(editor.getAnnotations()).toEqual([BOX, OTHER]);
         expect(editor.undo()).toBe(false);
     });
+
+    it('nor does one made from a deselect listener while the selected annotation is being removed', () => {
+        for (const remove of [(e) => e.deleteAnnotation('A'), (e) => e.clear()]) {
+            const { editor } = makeEditor({ annotations: [BOX, OTHER] });
+            editor.select('A');
+            editor.on('deselect', () => editor.createAnnotation({ id: 'N', bbox: [1, 1, 5, 5] }, { select: false }));
+            const reasons = [];
+            editor.on('change', (list, info) => reasons.push(info.reason));
+
+            remove(editor);
+
+            expect(reasons).toEqual(['create']); // that one change already carries the removal
+            expect(editor.getAnnotation('A')).toBe(null);
+            expect(editor.undo()).toBe(true);
+            expect(editor.getAnnotations()).toEqual([BOX, OTHER]);
+            expect(editor.undo()).toBe(false);
+            cleanup();
+        }
+    });
+});
+
+describe('a listener that edits the annotation being created', () => {
+    // Everything the host is told, in the order it is told.
+    const hear = (editor) => {
+        const heard = [];
+        editor.on('select', (e) => heard.push(`select ${e.id}`));
+        editor.on('deselect', (e) => heard.push(`deselect ${e.id}`));
+        editor.on('change', (list, info) =>
+            heard.push(`${info.reason} ${info.ids.join()}: ${list.map((ann) => ann.id).join()}`)
+        );
+        return heard;
+    };
+
+    it('a select listener that deletes it again: the creation and the deletion are two real steps', () => {
+        const { editor } = makeEditor();
+        const heard = hear(editor);
+        editor.on('select', (e) => editor.deleteAnnotation(e.id)); // e.g. the host rejects it
+
+        expect(editor.createAnnotation(BOX)).toBe('A');
+
+        expect(heard).toEqual(['create A: A', 'select A', 'deselect A', 'delete A: ']);
+        expect(editor.getSelection()).toBe(null);
+        expect(editor.undo()).toBe(true);
+        expect(editor.getAnnotations()).toEqual([BOX]);
+        expect(editor.undo()).toBe(true);
+        expect(editor.getAnnotations()).toEqual([]);
+        expect(editor.undo()).toBe(false);
+    });
+
+    it('a select listener that labels it: the creation is reported first, then the update', () => {
+        const { editor } = makeEditor();
+        const heard = hear(editor);
+        editor.on('select', (e) => editor.updateAnnotation(e.id, { class_id: 5 }));
+
+        editor.createAnnotation(BOX);
+
+        expect(heard).toEqual(['create A: A', 'select A', 'update A: A']);
+        expect(editor.getAnnotation('A').class_id).toBe(5);
+        expect(editor.undo()).toBe(true);
+        expect(editor.getAnnotations()).toEqual([BOX]);
+        expect(editor.undo()).toBe(true);
+        expect(editor.getAnnotations()).toEqual([]);
+        expect(editor.undo()).toBe(false);
+    });
+
+    it('a change listener that deletes it again: it is never selected', () => {
+        const { editor, svg } = makeEditor();
+        const heard = hear(editor);
+        editor.on('change', (list, info) => info.reason === 'create' && editor.deleteAnnotation(info.ids[0]));
+
+        expect(editor.createAnnotation(BOX)).toBe('A');
+
+        expect(heard).toEqual(['create A: A', 'delete A: ']);
+        expect(editor.getSelection()).toBe(null);
+        expect(svg.querySelectorAll('.markin-ui *').length).toBe(0);
+    });
+
+    it('a change listener that swaps its box for a polygon: the polygon is what gets selected', () => {
+        const { editor, svg } = makeEditor();
+        const triangle = [
+            [10, 10],
+            [90, 10],
+            [90, 90]
+        ];
+        editor.on('change', (list, info) => {
+            if (info.reason === 'create') editor.updateAnnotation('A', { bbox: null, segments: triangle });
+        });
+        const selected = [];
+        editor.on('select', (e) => selected.push(e.part));
+
+        editor.createAnnotation(BOX);
+
+        expect(selected).toEqual(['polygon']);
+        expect(editor.getSelection()).toMatchObject({ id: 'A', part: 'polygon' });
+        expect(polygonEl(svg, 'A').getAttribute('data-selected')).toBe('true');
+    });
 });
 
 describe('geometry at the edges', () => {
