@@ -592,6 +592,28 @@ describe('a stage the page marked', () => {
     });
 });
 
+describe('a picture that its own box crops', () => {
+    it('is never shown beyond what the page shows of it at rest', () => {
+        // An 800 x 300 picture in a 400 x 300 window that shows its middle, as object-fit: cover does.
+        const viewport = document.createElement('section');
+        viewport.innerHTML = '<div data-markin-stage><svg viewBox="0 0 800 300"></svg></div>';
+        document.body.appendChild(viewport);
+        const stage = viewport.firstChild;
+        setBox(viewport, { left: 0, top: 0, width: 400, height: 300 });
+        setBox(stage, { left: -200, top: 0, width: 800, height: 300 });
+        setBox(stage.firstChild, { left: -200, top: 0, width: 800, height: 300 });
+        const editor = track(MarkinJS.create(stage.firstChild, { silent: true }));
+        expect(editor.getView()).toEqual({ x: 200, y: 0, width: 400, height: 300, scale: 1 });
+
+        // Asked for the left end, which the window cuts off: the view stops where the window did,
+        // a handle's width aside.
+        editor.setView({ x: 0, y: 0, width: 200, height: 150 });
+        expect(editor.getView()).toEqual({ x: 194, y: 0, width: 200, height: 150, scale: 2 });
+        editor.setView({ x: 700, y: 150, width: 100, height: 75 });
+        expect(editor.getView()).toEqual({ x: 503, y: 150, width: 100, height: 75, scale: 4 });
+    });
+});
+
 describe('a viewport the page shares with other things', () => {
     // The page's own viewport, with a toolbar in it next to the stage.
     function shared() {
