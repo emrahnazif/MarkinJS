@@ -5,6 +5,25 @@ All notable changes to MarkinJS will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Outlines and handles blurred when the view was zoomed in, in Safari and in web views built on WebKit (WKWebView,
+  pywebview on macOS). The stage that held the image and the SVG was scaled with a CSS transform, and WebKit may
+  enlarge such a layer as a bitmap instead of drawing it again; it did on any page that also had a scrolling box.
+  The SVG is no longer scaled: zoomed in, its `viewBox` is the visible part of the image, so it is drawn at the
+  size it has on screen, and only the `<img>` under it is moved and scaled with CSS. A 2 px outline is 2 sharp
+  pixels at every zoom.
+
+### Changed
+- While the view is zoomed in, the `<svg>` has another `viewBox` and `preserveAspectRatio="none"`, and over an image
+  it covers the viewport. At rest and after `destroy()` it is as it was. The methods, the events and the
+  coordinates are unchanged.
+- An `<svg>` passed to `create()` is no longer wrapped in a viewport and a stage: it is its own viewport, and only
+  its `viewBox` changes. `getContainerElement()` returns `null` for it again, as in 0.2.
+- With a stage you marked (`data-markin-stage`), the transform is set on the picture inside the stage, not on the
+  stage itself.
+
 ## [0.3.1] - 2026-11-11
 
 ### Fixed
