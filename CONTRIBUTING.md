@@ -40,7 +40,7 @@ markinjs/
   markin.js          # Main source file (a classic script; the build adds the module export)
   markin.d.ts        # Type definitions, written by hand - update them with the API
   dist/              # Built output (IIFE, ESM, CJS, minified) - not committed
-  tests/             # Test files (vitest + jsdom, with simulated pointer and keyboard input)
+  tests/             # Test files (vitest + jsdom, with simulated pointer, wheel and keyboard input)
   examples/          # Interactive demos
   package.json
   rollup.config.mjs  # Build configuration

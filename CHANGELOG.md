@@ -5,6 +5,36 @@ All notable changes to MarkinJS will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-11-11
+
+Zoom and pan are built in. The data format, the methods and the events of 0.2 are unchanged; "Upgrading from 0.2"
+in the README lists what can still change on a page.
+
+### Added
+- Zoom and pan by hand. A trackpad pinch and Ctrl / Cmd + wheel zoom towards the pointer. The wheel, a drag on
+  empty canvas, Space + drag and the middle button move the view. `+`, `-`, Shift + 1 (whole image) and
+  Shift + 0 (real pixels) work from the keyboard. A click still selects; a drag of the view never edits.
+- `getView()`, `setView()`, `zoomBy()`, `fit()`, `zoomTo()`, `toImage()` and `toClient()`. `getView()` reports the
+  visible part of the image in whole image pixels, rounded outward and inside the image, so it can be used as a crop.
+- `viewchange` (at most once per frame while the view moves) and `viewsettle` (once the view has been still for
+  `settleDelay`, and only for another part of the image than last time).
+- `step(1)` / `step(-1)` select the next / previous annotation and frame it. `stepKeys` puts them on `n` and `p`.
+- Options `zoomControls`, `wheel` (`'pan'` or `'zoom'`), `panOnEmpty`, `maxScale`, `stepKeys` and `settleDelay`.
+- `data-markin-stage` marks the element to zoom when the page owns the markup around the SVG.
+- Tests that drive real wheel, pinch, pointer and keyboard input for all of the above (408 tests in total).
+
+### Changed
+- The canvas sits in a viewport and a stage, and zooming is one CSS transform on the stage. An `<svg>` passed to
+  `create()` is now wrapped like an `<img>`, unless it is positioned over other content or a stage is marked.
+  `getContainerElement()` returns the viewport for it. At rest nothing is transformed or clipped.
+- `disable()` stops editing only: the view still zooms and moves, and `hover` and `canvasclick` are still emitted,
+  so a tool of the app can work on the picture while the editor is disabled.
+- `canvasclick` is not emitted for a drag of the view, and the browser's `click` after such a drag is swallowed.
+- The size of the canvas on screen is measured from its box, not from `getScreenCTM()`, which leaves the scale of
+  a CSS-transformed ancestor out in WebKit.
+- The wheel is no longer watched to follow a zoom applied by another library. `refresh()` does that on request.
+- A `load` event for the picture that is already shown no longer counts as a new picture.
+
 ## [0.2.0] - 2026-11-10
 
 A rewrite of the library. The API is smaller and **not compatible with 0.1**; see
