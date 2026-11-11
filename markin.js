@@ -143,14 +143,13 @@ const MarkinJS = (function () {
     // Screen pixels per SVG unit under matrix `m`.
     const scaleOf = (m) => Math.sqrt(Math.abs(m.a * m.d - m.b * m.c));
 
-    // Keep a view within its limits. `g` is the geometry it is measured in (see Editor._geometry).
+    // Where a view of scale `s` may be moved to. `g` is the geometry it is measured in (see
+    // Editor._geometry); the scale itself is limited by whoever asks (see Editor._place).
     //
-    // The scale runs from 1, the picture as the page lays it out, up to `g.maxScale`. Along each
-    // axis the picture then either still fits in the viewport, and stays where the layout had it
-    // (centred, if it was centred), or it is larger, and can be moved until an edge of it comes
-    // `slack` pixels into view: enough to reach a handle that sits on the edge.
-    function clampView(scale, x, y, g, slack) {
-        const s = clamp(scale, 1, g.maxScale);
+    // Along each axis the picture either still fits in the viewport, and stays where the layout
+    // had it (centred, if it was centred), or it is larger, and can be moved until an edge of it
+    // comes `slack` pixels into view: enough to reach a handle that sits on the edge.
+    function limitView(s, x, y, g, slack) {
         const along = (t, size, o, from, to) => {
             // Nothing outside what the viewport shows at rest can ever be seen: an image cropped
             // by its own box stays cropped.
@@ -602,8 +601,7 @@ const MarkinJS = (function () {
         viewport.style.cssText = `position:relative;display:${block ? 'block' : 'inline-block'};line-height:0`;
         const stage = doc.createElement('div');
         stage.className = 'markin-stage';
-        // Nothing in the stage is text: a drag across it moves the view, it does not select.
-        stage.style.cssText = 'position:relative;user-select:none;-webkit-user-select:none';
+        stage.style.cssText = 'position:relative';
         subject.parentNode.insertBefore(viewport, subject);
         viewport.appendChild(stage);
         stage.appendChild(subject);
@@ -709,18 +707,7 @@ const MarkinJS = (function () {
         const marked = svg.parentElement ? svg.parentElement.closest('[data-markin-stage]') : null;
         if (marked) {
             const viewport = marked.parentElement;
-            if (!viewport) return null;
-            const saved = [marked.style.transform, marked.style.transformOrigin, viewport.style.overflow];
-            const cursor = viewport.style.cursor;
-            const select = marked.style.userSelect;
-            // A drag across the stage moves the view; it must not select the page around it.
-            marked.style.userSelect = 'none';
-            const teardown = () => {
-                [marked.style.transform, marked.style.transformOrigin, viewport.style.overflow] = saved;
-                viewport.style.cursor = cursor;
-                marked.style.userSelect = select;
-            };
-            return { container: viewport, stage: marked, saved, cursor, teardown };
+            return viewport ? { container: viewport, stage: marked, teardown() {} } : null;
         }
         if (!svg.parentNode) return null;
 
@@ -757,6 +744,37 @@ const MarkinJS = (function () {
         return { container: viewport, stage, teardown };
     }
 
+    // The inline styles of a stage and its viewport that the editor writes while it runs.
+    function styleNow(stage, viewport) {
+        return {
+            transform: stage.style.transform,
+            transformOrigin: stage.style.transformOrigin,
+            userSelect: stage.style.userSelect,
+            webkitUserSelect: stage.style.webkitUserSelect,
+            overflow: viewport.style.overflow,
+            cursor: viewport.style.cursor
+        };
+    }
+
+    // What is listened for on the viewport, and what hears it. The wheel and the pinch are kept
+    // apart: to be prevented they must be heard in a way that makes the browser wait for the page
+    // before it scrolls, which is only worth it while they are used.
+    const VIEWPORT_EVENTS = {
+        pointerdown: '_onPointerDown',
+        mousedown: '_onMiddle',
+        auxclick: '_onMiddle',
+        dragstart: '_onNativeDrag'
+    };
+    // gesture*: WebKit's own events for a trackpad pinch. Other browsers never send them.
+    const ZOOM_EVENTS = {
+        wheel: '_onWheel',
+        gesturestart: '_onPinch',
+        gesturechange: '_onPinch',
+        gestureend: '_onPinch'
+    };
+    // The kinds of press that hold an annotation. The others, 'canvas' and 'pan', hold none.
+    const EDITING_GESTURES = ['press', 'move', 'resize', 'vertex'];
+
     // ------------------------------------------------------------------ editor
 
     class Editor {
@@ -782,13 +800,27 @@ const MarkinJS = (function () {
             this.target = target;
             const warn = (message) => this._log('warn', message);
             this.host =
-                target.localName === 'img' ? mountOverImage(target, (fresh) => this._layoutChanged(fresh), warn) : null;
+                target.localName === 'img'
+                    ? mountOverImage(
+                          target,
+                          (fresh) => {
+                              if (fresh) this._resetView();
+                              this.refresh();
+                          },
+                          warn
+                      )
+                    : null;
             this.svg = this.host ? this.host.svg : target;
             // What zoom and pan work on. An <svg> that could not be given a viewport has no view.
             // An <svg> that cannot be given them works as before; only a host that wants zoom is told.
             this.frame = this.host || mountAroundSvg(target, (message) => this.opts.zoomControls && warn(message));
             this.viewport = this.frame ? this.frame.container : null;
             this.stage = this.frame ? this.frame.stage : null;
+            // What the page itself had written on the two, which is what they go back to when the
+            // view is at rest and when the editor is destroyed. A wrapper made here has nothing.
+            this.rest = this.frame ? styleNow(this.stage, this.viewport) : null;
+            // Nothing in the stage is text: a drag across it moves the view, it does not select.
+            if (this.stage) Object.assign(this.stage.style, { userSelect: 'none', webkitUserSelect: 'none' });
             // The SVG may live in another document than this script (an iframe, a popup).
             this.doc = this.svg.ownerDocument;
             this.win = this.doc.defaultView || window;
@@ -844,48 +876,70 @@ const MarkinJS = (function () {
             svg.appendChild(this.layer);
 
             this.savedTouchAction = svg.style.touchAction || '';
-            svg.style.touchAction = 'none';
 
             const on = (target, type, method, options) => listen(target, type, (event) => this[method](event), options);
             this.cleanup = [
                 on(svg, 'pointerdown', '_onPointerDown'),
-                // On the viewport where there is one: it also hears the pointer over a disabled overlay.
-                on(this.viewport || svg, 'pointermove', '_onHover'),
                 on(svg, 'touchstart', '_onTouchStart', { passive: true }),
                 weakListen(this.doc, 'keydown', this, '_onKeyDown'),
                 weakListen(this.doc, 'keyup', this, '_onKeyUp'),
-                weakListen(this.win, 'resize', this, '_onResize')
+                weakListen(this.win, 'resize', this, '_onResize'),
+                weakListen(this.win, 'blur', this, '_onBlur'),
+                // On the viewport where there is one: it also hears the pointer over a disabled overlay.
+                weakListen(this.viewport || svg, 'pointermove', this, '_onHover')
             ];
-            // Zoom and pan are listened for on the viewport, which is there whatever the picture is
-            // moved to, and also hears what happens over the image while the editor is disabled.
-            if (this.viewport) {
-                const vp = this.viewport;
-                this.cleanup.push(
-                    // A press the <svg> did not take: on the image under a disabled overlay, or
-                    // beside the picture.
-                    on(vp, 'pointerdown', '_onPointerDown'),
-                    on(vp, 'pointermove', '_onInside'),
-                    on(vp, 'pointerleave', '_onOutside'),
-                    on(vp, 'mousedown', '_onMiddle'),
-                    on(vp, 'auxclick', '_onMiddle'),
-                    on(vp, 'dragstart', '_onNativeDrag'),
-                    weakListen(this.win, 'blur', this, '_onBlur'),
-                    on(vp, 'wheel', '_onWheel', { passive: false }),
-                    // WebKit's own events for a trackpad pinch. Other browsers never send them.
-                    on(vp, 'gesturestart', '_onPinch', { passive: false }),
-                    on(vp, 'gesturechange', '_onPinch', { passive: false }),
-                    on(vp, 'gestureend', '_onPinch', { passive: false })
-                );
+            // The viewport is there whatever the picture is moved to, and hears what happens over the
+            // image of a disabled editor. It stays in the page if the host drops the editor without
+            // destroy(), so nothing that listens on it may keep the editor alive.
+            const vp = this.viewport;
+            if (vp) {
+                this.cleanup.push(weakListen(vp, 'pointerleave', this, '_onOutside'));
+                for (const type of Object.keys(VIEWPORT_EVENTS)) {
+                    this.cleanup.push(weakListen(vp, type, this, '_onViewport'));
+                }
             }
+            this.zoomStops = null;
+            this._hearZoom();
+            this._syncPointer();
             // Over an image, the overlay is resized by the image's own observer, which also refreshes
             // the editor. A second observer here would only chase the first one.
             const Observer = this.win.ResizeObserver;
             if (!this.host && typeof Observer === 'function') {
-                const observer = new Observer(() => this._layoutChanged());
+                const ref = weakRefTo(this);
+                const observer = new Observer(() => {
+                    const live = ref.deref();
+                    if (live) live.refresh();
+                    else observer.disconnect();
+                });
                 observer.observe(svg);
                 // A viewport the page sizes can change while the <svg> stays as it is.
-                if (this.viewport) observer.observe(this.viewport);
+                if (vp) observer.observe(vp);
                 this.cleanup.push(() => observer.disconnect());
+            }
+        }
+
+        // Everything heard on the viewport comes through here. Only what happens on the picture, or
+        // on the bare viewport around it, is the editor's: anything else the page put inside its own
+        // viewport, a toolbar for one, keeps its events to itself.
+        _onViewport(event) {
+            if (this._onCanvas(event)) this[VIEWPORT_EVENTS[event.type] || ZOOM_EVENTS[event.type]](event);
+        }
+
+        _onCanvas(event) {
+            const target = event.target;
+            return target === this.viewport || (this.stage || this.svg).contains(target);
+        }
+
+        // Listen for the wheel and the pinch exactly while the user may move the view with them.
+        _hearZoom() {
+            const want = this._pans();
+            if (want === !!this.zoomStops) return;
+            if (want) {
+                const hear = (type) => weakListen(this.viewport, type, this, '_onViewport', { passive: false });
+                this.zoomStops = Object.keys(ZOOM_EVENTS).map(hear);
+            } else {
+                for (const stop of this.zoomStops) stop();
+                this.zoomStops = null;
             }
         }
 
@@ -906,11 +960,12 @@ const MarkinJS = (function () {
 
         destroy() {
             if (this.dead) return;
-            if (this.gesture) this._finishGesture(true);
+            this._finishGesture(true);
             this._settle();
             this.dead = true;
             this.enabled = false;
             for (const stop of this.cleanup) stop();
+            this._hearZoom();
             clearTimeout(this.settleTimer);
             this.listeners = Object.create(null);
             // Let go of everything that was drawn, and of the page's route back to this editor.
@@ -918,7 +973,12 @@ const MarkinJS = (function () {
             for (const layer of [this.shapesLayer, this.pointsLayer, this.uiLayer]) layer.textContent = '';
             if (registry.get(this.target) === this) registry.delete(this.target);
             this.svg.style.touchAction = this.savedTouchAction;
-            if (this.frame) this.frame.teardown();
+            if (this.frame) {
+                const { overflow, cursor, ...stage } = this.rest;
+                Object.assign(this.stage.style, stage);
+                Object.assign(this.viewport.style, { overflow, cursor });
+                this.frame.teardown();
+            }
             this.list = [];
             this.byId.clear();
             this.dom.clear();
@@ -1105,34 +1165,27 @@ const MarkinJS = (function () {
             if (!this.dead && this._measure()) this._rescale();
         }
 
-        refresh() {
-            this._layoutChanged();
-        }
-
         _onResize() {
             if (this.host) this.host.sync();
-            else this._layoutChanged();
+            else this.refresh();
         }
 
-        // The canvas changed size or place on the page, or (`fresh`) shows another picture.
-        _layoutChanged(fresh) {
+        // The canvas changed size or place on the page: measure it again.
+        refresh() {
             if (this.dead) return;
-            if (fresh) this._resetView();
             this._remeasure();
             const g = this._geometry();
             if (!g) return;
+            // A view that is zoomed in keeps showing the same part of the picture ...
             const v = this.view;
-            if (v.scale > g.maxScale) {
-                // The limit came down: zoom out around the middle of what is shown.
-                this._zoomAt(g.maxScale, g.left + (g.width * g.kx) / 2, g.top + (g.height * g.ky) / 2, g);
-                this._viewChanged();
-                return;
-            }
-            // A view that is zoomed in keeps showing the same part of the picture.
             const was = this.stageSize;
             const x = was && was[0] > 0 ? (v.x * g.stageWidth) / was[0] : v.x;
             const y = was && was[1] > 0 ? (v.y * g.stageHeight) / was[1] : v.y;
-            this._setView(v.scale, x, y, g);
+            // ... as far as the limits allow, which may be other ones now: what is in the middle
+            // of the viewport stays there.
+            const cx = g.width / 2 - g.ox;
+            const cy = g.height / 2 - g.oy;
+            this._place(v.scale, (cx - x) / v.scale, (cy - y) / v.scale, cx, cy, g);
             // The same view shows another part of the image once the viewport has another size.
             this._viewChanged();
         }
@@ -1207,13 +1260,12 @@ const MarkinJS = (function () {
             return [unmap(g.m, g.left, g.top), unmap(g.m, g.left + g.width * g.kx, g.top + g.height * g.ky)];
         }
 
-        // Move the view, within its limits. True when that changed it.
-        _setView(scale, x, y, g = this._geometry()) {
-            if (!g) return false;
+        // Move the view, as far as the picture allows. True when that changed it.
+        _setView(scale, x, y, g) {
             this.stageSize = [g.stageWidth, g.stageHeight];
             // The slack is the width of a handle, which is a size on screen.
             const slack = (2 * this.opts.handleRadius + this.opts.strokeWidth) / g.kx;
-            const next = clampView(scale, x, y, g, slack);
+            const next = limitView(scale, x, y, g, slack);
             const v = this.view;
             if (next.scale === v.scale && next.x === v.x && next.y === v.y) return false;
             this.view = next;
@@ -1224,19 +1276,32 @@ const MarkinJS = (function () {
             return true;
         }
 
+        // Show the stage point (sx, sy) at (ax, ay), at `scale` or as near to it as the limits
+        // allow. (ax, ay) is in viewport pixels, counted from where the stage starts at rest.
+        // Everything that zooms comes through here.
+        _place(scale, sx, sy, ax, ay, g) {
+            const s = clamp(scale, 1, g.maxScale);
+            return this._setView(s, ax - s * sx, ay - s * sy, g);
+        }
+
+        // Move the view by a distance on screen.
+        _panBy(dx, dy, g) {
+            const v = this.view;
+            return this._setView(v.scale, v.x + dx / g.kx, v.y + dy / g.ky, g);
+        }
+
         _writeView() {
             const { scale, x, y } = this.view;
             const rest = scale === 1 && x === 0 && y === 0;
-            const saved = this.frame.saved || ['', '', ''];
-            this.stage.style.transformOrigin = rest ? saved[1] : '0 0';
-            this.stage.style.transform = rest ? saved[0] : `translate(${x}px, ${y}px) scale(${scale})`;
+            this.stage.style.transformOrigin = rest ? this.rest.transformOrigin : '0 0';
+            this.stage.style.transform = rest ? this.rest.transform : `translate(${x}px, ${y}px) scale(${scale})`;
             // At rest nothing is clipped, so a handle on the edge of the picture is drawn whole.
             // Zoomed in, the viewport is a window onto the stage.
-            this.viewport.style.overflow = rest ? saved[2] : 'hidden';
+            this.viewport.style.overflow = rest ? this.rest.overflow : 'hidden';
         }
 
+        // Back to the whole picture, without a word: for another picture in the same place.
         _resetView() {
-            if (!this.viewport) return;
             this.view = { scale: 1, x: 0, y: 0 };
             this.stageSize = null;
             this.settledKey = null; // another picture is news, even at the same size
@@ -1272,12 +1337,11 @@ const MarkinJS = (function () {
         _armSettle() {
             clearTimeout(this.settleTimer);
             // Not while the view is held: a pause in a drag is not the end of it.
-            if (this.gesture && this.gesture.kind === 'pan') return;
+            if (this._panning()) return;
             this.settleTimer = this._later(() => this._settleView(), this.opts.settleDelay);
         }
 
         _settleView() {
-            this.settleTimer = 0;
             const view = this.getView();
             if (!view) return;
             // Only a view that would give another crop is worth the host's work.
@@ -1287,20 +1351,17 @@ const MarkinJS = (function () {
             this._emit('viewsettle', view);
         }
 
-        // Zoom to `scale`, keeping what is under the client point (clientX, clientY) where it is.
-        _zoomAt(scale, clientX, clientY, g = this._geometry()) {
-            if (!g) return false;
+        // Zoom to `scale`, keeping what is under a point on screen where it is: the client point
+        // (clientX, clientY), or else the middle of the viewport.
+        _zoomAt(scale, g, clientX = g.left + (g.width * g.kx) / 2, clientY = g.top + (g.height * g.ky) / 2) {
             const v = this.view;
-            const s = clamp(scale, 1, g.maxScale);
-            // The point in viewport pixels, counted from where the stage starts at rest.
             const ax = (clientX - g.left) / g.kx - g.ox;
             const ay = (clientY - g.top) / g.ky - g.oy;
-            const ratio = s / v.scale;
-            return this._setView(s, ax - (ax - v.x) * ratio, ay - (ay - v.y) * ratio, g);
+            return this._place(scale, (ax - v.x) / v.scale, (ay - v.y) / v.scale, ax, ay, g);
         }
 
-        // Show the image rectangle (x1, y1)-(x2, y2) as large as it fits, `pad` screen pixels
-        // away from the edges of the viewport.
+        // Show the image rectangle (x1, y1)-(x2, y2) in the middle of the viewport, as large as it
+        // fits `pad` screen pixels away from the edges.
         _show(x1, y1, x2, y2, pad) {
             const g = this._geometry();
             if (!g) return false;
@@ -1308,11 +1369,9 @@ const MarkinJS = (function () {
             const b = this._onStage(g, x2, y2);
             const roomX = Math.max(g.width - (2 * pad) / g.kx, 1);
             const roomY = Math.max(g.height - (2 * pad) / g.ky, 1);
-            const wanted = Math.min(roomX / Math.abs(b.x - a.x), roomY / Math.abs(b.y - a.y));
-            const s = clamp(Number.isNaN(wanted) ? Infinity : wanted, 1, g.maxScale);
-            const x = g.width / 2 - g.ox - (s * (a.x + b.x)) / 2;
-            const y = g.height / 2 - g.oy - (s * (a.y + b.y)) / 2;
-            this._setView(s, x, y, g);
+            // A rectangle without a size, a single keypoint, is shown as close as the view goes.
+            const scale = Math.min(roomX / Math.abs(b.x - a.x), roomY / Math.abs(b.y - a.y));
+            this._place(scale, (a.x + b.x) / 2, (a.y + b.y) / 2, g.width / 2 - g.ox, g.height / 2 - g.oy, g);
             return true;
         }
 
@@ -1362,10 +1421,8 @@ const MarkinJS = (function () {
             const g = this._geometry();
             if (!g) return false;
             // Around the given point of the image, or else the middle of the viewport.
-            const c = at
-                ? map(g.m, at.x, at.y)
-                : { x: g.left + (g.width * g.kx) / 2, y: g.top + (g.height * g.ky) / 2 };
-            this._zoomAt(this.view.scale * factor, c.x, c.y, g);
+            const c = at ? map(g.m, at.x, at.y) : {};
+            this._zoomAt(this.view.scale * factor, g, c.x, c.y);
             return true;
         }
 
@@ -1404,7 +1461,7 @@ const MarkinJS = (function () {
             if (!ann) return false;
             this._select(String(ann.id), this._mainPart(ann), null);
             // A select listener may have removed it again.
-            if (this.byId.has(String(ann.id)) && this.viewport) this.zoomTo(ann.id);
+            if (this.byId.has(String(ann.id))) this.zoomTo(ann.id);
             return true;
         }
 
@@ -1434,17 +1491,9 @@ const MarkinJS = (function () {
             return !this.dead && !!this.viewport && this.opts.zoomControls;
         }
 
-        // True for an event on the picture or on the bare viewport around it. Anything else the
-        // page put inside its own viewport, a toolbar for one, keeps its events to itself.
-        _onCanvas(event) {
-            const target = event.target;
-            return target === this.viewport || (this.stage || this.svg).contains(target);
-        }
-
         // A wheel or a trackpad. Pinching a trackpad also arrives here, as a wheel with Ctrl held
         // (Chrome, Firefox, Edge); WebKit sends gesture events instead.
         _onWheel(event) {
-            if (!this._pans() || !this._onCanvas(event)) return;
             const pinch = event.ctrlKey || event.metaKey;
             const zooms = pinch || this.opts.wheel === 'zoom';
             // One movement of the wheel or the fingers is many events, and whose it is gets decided
@@ -1463,17 +1512,16 @@ const MarkinJS = (function () {
             const lines = event.deltaMode === 1 ? WHEEL_LINE : event.deltaMode === 2 ? g.height * g.ky : 1;
             let dx = (event.deltaX || 0) * lines;
             let dy = (event.deltaY || 0) * lines;
-            const v = this.view;
             let moved;
             if (zooms) {
                 // A notch of a mouse wheel is about 100 and zooms by 15%. A pinch reports small
                 // numbers, which Ctrl marks; a real Ctrl + wheel is kept from leaping.
                 const power = clamp(-dy * 0.002 * (event.ctrlKey ? 10 : 1), -0.35, 0.35);
-                moved = this._zoomAt(v.scale * Math.pow(2, power), event.clientX, event.clientY, g);
+                moved = this._zoomAt(this.view.scale * Math.pow(2, power), g, event.clientX, event.clientY);
             } else {
                 // Shift turns a wheel that only goes up and down sideways.
                 if (event.shiftKey && dx === 0) [dx, dy] = [dy, 0];
-                moved = this._setView(v.scale, v.x - dx / g.kx, v.y - dy / g.ky, g);
+                moved = this._panBy(-dx, -dy, g);
             }
             if (first && moved) run.ours = true;
             if (run.ours) event.preventDefault();
@@ -1482,7 +1530,6 @@ const MarkinJS = (function () {
         // A trackpad pinch in WebKit (Safari, and the web views built on it). `event.scale` is how
         // far the fingers have moved apart since the pinch began. Prevented, or the whole page zooms.
         _onPinch(event) {
-            if (!this._pans() || !this._onCanvas(event)) return;
             event.preventDefault();
             if (event.type === 'gestureend') {
                 this.pinch = null;
@@ -1496,7 +1543,8 @@ const MarkinJS = (function () {
             if (!(isNum(event.scale) && event.scale > 0)) return;
             // The pointer does not move during a pinch, but the event that says where it is may not either.
             const p = this.pinch;
-            this._zoomAt(p.scale * event.scale, at(event.clientX, p.x), at(event.clientY, p.y));
+            const g = this._geometry();
+            if (g) this._zoomAt(p.scale * event.scale, g, at(event.clientX, p.x), at(event.clientY, p.y));
         }
 
         // ---- model
@@ -1735,7 +1783,7 @@ const MarkinJS = (function () {
         // Finish anything in flight (a drag, uncommitted nudges) before another change is made.
         _settle() {
             // A drag of the view holds nothing that another change could upset, and goes on.
-            if (this.gesture && this.gesture.key !== undefined) this._finishGesture(true);
+            if (this.gesture && EDITING_GESTURES.includes(this.gesture.kind)) this._finishGesture(true);
             this._flushNudge();
         }
 
@@ -2038,10 +2086,7 @@ const MarkinJS = (function () {
         enable() {
             if (this.dead || this.enabled) return;
             this.enabled = true;
-            this.layer.style.pointerEvents = '';
-            this._showGrab();
-            if (this.host) this.svg.style.pointerEvents = '';
-            this.svg.style.touchAction = 'none';
+            this._syncPointer();
             this._remeasure();
         }
 
@@ -2053,10 +2098,12 @@ const MarkinJS = (function () {
             this._settle();
             this.deselect();
             this.enabled = false;
-            this.layer.style.pointerEvents = 'none';
-            // Over an image the overlay is ours, and it would still cover the image.
-            if (this.host) this.svg.style.pointerEvents = 'none';
-            this.svg.style.touchAction = this.savedTouchAction;
+            this._syncPointer();
+        }
+
+        // A disabled editor still hears the pointer for its view. Without a view it hears nothing.
+        _hears() {
+            return this.enabled || !!this.viewport;
         }
 
         isEnabled() {
@@ -2075,7 +2122,8 @@ const MarkinJS = (function () {
             if (this.opts.historyEnabled) this._trimHistory();
             else this._resetHistory();
             this._renderAll();
-            this._layoutChanged(); // the limits of the view may be other ones now
+            this._hearZoom();
+            this.refresh(); // the limits of the view may be other ones now
         }
 
         getOptions() {
@@ -2417,7 +2465,8 @@ const MarkinJS = (function () {
 
         // What a pointer event landed on: one of our handles, one of our annotation parts, or nothing.
         _hit(target) {
-            if (!target || typeof target.closest !== 'function') return null;
+            // Nothing can be pointed at in an editor that does not edit.
+            if (!this.enabled || !target || typeof target.closest !== 'function') return null;
             const grab = target.closest('[data-markin-handle]');
             if (grab && this.uiLayer.contains(grab)) {
                 return { kind: 'handle', handle: grab.getAttribute('data-markin-handle') };
@@ -2440,11 +2489,10 @@ const MarkinJS = (function () {
             // One press is heard on the <svg> and, unless that took it, again on the viewport.
             if (this.pressed === event) return;
             this.pressed = event;
-            if (!this._onCanvas(event)) return;
             this.inside = true;
             // A disabled editor edits nothing, but its view still moves and a click is still reported.
             const editing = this.enabled;
-            if (!editing && !this.viewport) return;
+            if (!this._hears()) return;
             claimKeyboard(this, true);
             if (event.isPrimary === false) return;
             // Space or the middle button: this drag moves the view, whatever it starts on.
@@ -2456,7 +2504,7 @@ const MarkinJS = (function () {
                 this._finishGesture(!this.gesture.live);
             }
             // Resolve the target first: the calls below may redraw the handles.
-            const hit = grab || !editing ? null : this._hit(event.target);
+            const hit = grab ? null : this._hit(event.target);
             this._flushNudge();
             this._remeasure();
             if (editing && !this.enabled) return; // a change listener may have run
@@ -2495,7 +2543,7 @@ const MarkinJS = (function () {
                 listen(this.win, 'pointerup', (e) => this._onGestureEnd(e, false), true),
                 listen(this.win, 'pointercancel', (e) => this._onGestureEnd(e, true), true)
             ];
-            this._showGrab();
+            this._syncPointer();
         }
 
         _capture(gesture, element) {
@@ -2509,17 +2557,20 @@ const MarkinJS = (function () {
 
         // ---- moving the view by dragging
 
-        // A hand over the whole editor while a drag would move the view, or does. The annotations
-        // stop taking the pointer for that time, so the hand shows over them as well.
-        _showGrab() {
-            if (!this.viewport) return;
-            const dragging = !!this.gesture && this.gesture.kind === 'pan';
-            this.viewport.style.cursor = dragging ? 'grabbing' : this.space ? 'grab' : this.frame.cursor || '';
-            this.layer.style.pointerEvents = dragging || this.space || !this.enabled ? 'none' : '';
+        _panning() {
+            return !!this.gesture && this.gesture.kind === 'pan';
         }
 
-        _onInside() {
-            this.inside = true;
+        // What the pointer can reach, and how it looks. It follows from three things: whether the
+        // editor edits, whether Space is held, and whether the view is being dragged.
+        _syncPointer() {
+            const hand = this._panning() ? 'grabbing' : this.space ? 'grab' : '';
+            if (this.viewport) this.viewport.style.cursor = hand || this.rest.cursor;
+            // Under the hand the annotations stop taking the pointer, so it shows over them as well.
+            this.layer.style.pointerEvents = hand || !this.enabled ? 'none' : '';
+            // Over an image the overlay is ours, and it would still cover the image of a disabled editor.
+            if (this.host) this.svg.style.pointerEvents = this.enabled ? '' : 'none';
+            this.svg.style.touchAction = this.enabled ? 'none' : this.savedTouchAction;
         }
 
         _onOutside() {
@@ -2528,7 +2579,7 @@ const MarkinJS = (function () {
 
         // The middle button must not start the browser's own scrolling, paste or open anything.
         _onMiddle(event) {
-            if (event.button === 1 && this._pans() && this._onCanvas(event)) event.preventDefault();
+            if (event.button === 1 && this._pans()) event.preventDefault();
         }
 
         // A press that is being followed must not turn into the browser dragging the image away.
@@ -2539,23 +2590,21 @@ const MarkinJS = (function () {
         _onBlur() {
             if (!this.space) return;
             this.space = false;
-            this._showGrab();
+            this._syncPointer();
         }
 
         // Space, held with the pointer over the editor, makes the next drag move the view.
         // It follows the pointer, not the editor that was used last. True when the key was taken.
         _onSpace(event, down) {
             if (event.code !== 'Space' && event.key !== ' ') return false;
-            if (down && !this.space) {
-                if (!this.inside || !this._pans() || event.ctrlKey || event.metaKey || event.altKey) return false;
-            } else if (!this.space) {
-                return false;
-            }
+            const modified = event.ctrlKey || event.metaKey || event.altKey;
+            const starts = down && this.inside && this._pans() && !modified;
+            if (!this.space && !starts) return false;
             // Also on the way up, and while it repeats: the page must not scroll or press a button.
             event.preventDefault();
             if (this.space !== down) {
                 this.space = down;
-                this._showGrab();
+                this._syncPointer();
             }
             return true;
         }
@@ -2564,19 +2613,17 @@ const MarkinJS = (function () {
         // real pixels. True when the view changed: a key that changes nothing is left to the page.
         _viewKey(event) {
             if (!this._pans() || event.ctrlKey || event.metaKey || event.altKey) return false;
-            const zoom = (scale) => {
-                const g = this._geometry();
-                if (!g) return false;
-                // Scale 1 here means the real pixels: one pixel of the image on one of the screen.
-                const s = scale === 1 ? this.view.scale / g.scale : this.view.scale * scale;
-                return this._zoomAt(s, g.left + (g.width * g.kx) / 2, g.top + (g.height * g.ky) / 2, g);
-            };
+            const g = this._geometry();
+            if (!g) return false;
+            const scale = this.view.scale;
             // The digits are read by where the keys are. With Shift they type other characters, and
             // which ones depends on the keyboard: Shift+0 is "=" on a German or a Turkish one.
-            if (event.shiftKey && event.code === 'Digit1') return this.view.scale !== 1 && this.fit();
-            if (event.shiftKey && event.code === 'Digit0') return zoom(1);
-            if (event.key === '+' || event.key === '=' || event.code === 'NumpadAdd') return zoom(KEY_ZOOM);
-            if (event.key === '-' || event.code === 'NumpadSubtract') return zoom(1 / KEY_ZOOM);
+            if (event.shiftKey && event.code === 'Digit1') return this._setView(1, 0, 0, g);
+            // Real pixels: one pixel of the image on one of the screen.
+            if (event.shiftKey && event.code === 'Digit0') return this._zoomAt(scale / g.scale, g);
+            if (event.key === '+' || event.key === '=' || event.code === 'NumpadAdd')
+                return this._zoomAt(scale * KEY_ZOOM, g);
+            if (event.key === '-' || event.code === 'NumpadSubtract') return this._zoomAt(scale / KEY_ZOOM, g);
             return false;
         }
 
@@ -2669,7 +2716,7 @@ const MarkinJS = (function () {
         }
 
         _onTouchStart(event) {
-            if (this.enabled && this._hit(event.target)) event.stopPropagation();
+            if (this._hit(event.target)) event.stopPropagation();
         }
 
         // dragstart, drag and dragend. The payload carries a copy of the annotation, so it is only
@@ -2705,18 +2752,13 @@ const MarkinJS = (function () {
                 }
                 if (g.kind === 'pan') {
                     g.live = true;
-                    this._showGrab();
+                    this._syncPointer();
                 }
             }
             if (g.kind === 'pan') {
                 event.preventDefault();
                 const geo = this._geometry();
-                if (geo) {
-                    const v = this.view;
-                    const dx = (event.clientX - g.lastX) / geo.kx;
-                    const dy = (event.clientY - g.lastY) / geo.ky;
-                    this._setView(v.scale, v.x + dx, v.y + dy, geo);
-                }
+                if (geo) this._panBy(event.clientX - g.lastX, event.clientY - g.lastY, geo);
                 g.lastX = event.clientX;
                 g.lastY = event.clientY;
                 return;
@@ -2760,7 +2802,7 @@ const MarkinJS = (function () {
                 }
             }
             if (g.kind === 'pan') {
-                this._showGrab();
+                this._syncPointer();
                 if (g.moved && event && !cancelled && g.button === 0) this._swallowClick();
                 // The view was not allowed to settle while it was held.
                 if (g.moved) this._viewChanged();
@@ -2784,7 +2826,9 @@ const MarkinJS = (function () {
         }
 
         _onHover(event) {
-            if (this.gesture || (!this.enabled && !this.viewport) || !this._onCanvas(event)) return;
+            // Over something else the page put inside its viewport, the pointer is not over the editor.
+            this.inside = this._onCanvas(event);
+            if (!this.inside || this.gesture || !this._hears()) return;
             this.hoverEvent = { clientX: event.clientX, clientY: event.clientY, target: event.target };
             if (this.hoverFrame) return;
             this.hoverFrame = this._frame(() => {
@@ -2792,8 +2836,7 @@ const MarkinJS = (function () {
                 const last = this.hoverEvent;
                 this.hoverEvent = null;
                 if (!last) return;
-                // Nothing can be pointed at in a disabled editor; where the pointer is still counts.
-                const hit = this.enabled ? this._hit(last.target) : null;
+                const hit = this._hit(last.target);
                 const part = hit && hit.kind === 'part' ? hit : null;
                 this._remeasure();
                 if (!this._has('hover')) return;

@@ -315,6 +315,17 @@ describe('the view and the page', () => {
         expect(written(editor).transform).toBe('translate(-200px, -150px) scale(2)');
     });
 
+    it('keeps the middle in place when a resize also brings the limit down', () => {
+        const { editor, svg } = makeEditor({}, HALF);
+        editor.zoomBy(1e6);
+        expect(editor.getView()).toEqual({ x: 787, y: 590, width: 26, height: 20, scale: 32 });
+        // Twice the size on the page: at rest one image pixel is now a whole pixel on screen, so
+        // the closest view is half as many times the size at rest.
+        setBox(svg, { left: 20, top: 20, width: 1600, height: 1200 });
+        editor.refresh();
+        expect(editor.getView()).toEqual({ x: 775, y: 581, width: 50, height: 38, scale: 32 });
+    });
+
     it('goes back to the whole image when the picture is replaced', () => {
         const { image, load } = makeImage({ width: 1600, height: 1200 });
         const editor = track(MarkinJS.create(image, { silent: true }));
@@ -620,9 +631,17 @@ describe('a viewport the page shares with other things', () => {
         expect(editor.getView()).toEqual(before);
         expect(editor.getSelection().id).toBe('A');
 
+        // Coming off the picture onto the toolbar, the pointer is no longer over the editor:
+        // Space stays the page's.
+        pointer('pointermove', svg, 700, 500, { buttons: 0 });
+        pointer('pointermove', button, 400, 300, { buttons: 0 });
+        expect(key(' ', { code: 'Space' }).defaultPrevented).toBe(false);
+        await nextFrame();
+        expect(heard).toEqual(['hover']);
+
         // The picture itself still answers.
         click(svg, 700, 500);
-        expect(heard).toEqual(['deselect', 'canvasclick']);
+        expect(heard).toEqual(['hover', 'deselect', 'canvasclick']);
     });
 
     it('keeps a drag from selecting the page, and gives the styles it borrowed back', () => {
