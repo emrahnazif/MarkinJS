@@ -573,3 +573,93 @@ describe('dragging the view', () => {
         }).not.toThrow();
     });
 });
+
+describe('zooming with the keyboard', () => {
+    const scaleOf = (editor) => editor.getView().scale;
+
+    it('+ and - zoom around the middle of the view', () => {
+        const { editor } = clocked();
+        expect(key('+').defaultPrevented).toBe(true);
+        expect(editor.getView()).toEqual({ x: 160, y: 120, width: 1280, height: 960, scale: 0.625 });
+        key('=');
+        expect(scaleOf(editor)).toBeCloseTo(0.5 * 1.25 * 1.25, 5);
+        key('-');
+        expect(editor.getView()).toEqual({ x: 160, y: 120, width: 1280, height: 960, scale: 0.625 });
+        key('+', { code: 'NumpadAdd' });
+        key('-', { code: 'NumpadSubtract' });
+        key('-');
+        expect(editor.getView()).toEqual(WHOLE);
+    });
+
+    it('Shift+1 shows the whole image and Shift+0 its real pixels', () => {
+        const { editor } = clocked();
+        expect(key(')', { code: 'Digit0', shiftKey: true }).defaultPrevented).toBe(true);
+        expect(editor.getView()).toEqual({ x: 400, y: 300, width: 800, height: 600, scale: 1 });
+        editor.zoomBy(7, { x: 100, y: 100 });
+        key(')', { code: 'Digit0', shiftKey: true });
+        expect(scaleOf(editor)).toBe(1);
+        expect(key('!', { code: 'Digit1', shiftKey: true }).defaultPrevented).toBe(true);
+        expect(editor.getView()).toEqual(WHOLE);
+    });
+
+    it('reads the digits by where the keys are, whatever they type', () => {
+        const { editor } = clocked();
+        // A German or Turkish keyboard: Shift+0 types "=". That is the real pixels, not a zoom in.
+        key('=', { code: 'Digit0', shiftKey: true });
+        expect(scaleOf(editor)).toBe(1);
+        // A French one: the digits are typed with Shift.
+        key('1', { code: 'Digit1', shiftKey: true });
+        expect(editor.getView()).toEqual(WHOLE);
+    });
+
+    it('leaves a key that changes nothing to the page', () => {
+        const { editor } = clocked({ maxScale: 0.5 });
+        for (const [name, init] of [
+            ['-', {}],
+            ['+', {}],
+            ['!', { code: 'Digit1', shiftKey: true }],
+            [')', { code: 'Digit0', shiftKey: true }]
+        ]) {
+            expect(key(name, init).defaultPrevented).toBe(false);
+        }
+        expect(editor.getView()).toEqual(WHOLE);
+    });
+
+    it('leaves the bare digits and anything with Ctrl, Cmd or Alt alone', () => {
+        const { editor } = clocked();
+        const untouched = [
+            ['0', { code: 'Digit0' }],
+            ['1', { code: 'Digit1' }],
+            ['+', { ctrlKey: true }],
+            ['=', { metaKey: true }],
+            ['-', { altKey: true }],
+            ['0', { code: 'Digit0', shiftKey: true, ctrlKey: true }]
+        ];
+        editor.zoomBy(2);
+        for (const [name, init] of untouched) expect(key(name, init).defaultPrevented).toBe(false);
+        expect(scaleOf(editor)).toBe(1);
+    });
+
+    it('follows the rules of the other keys: not while typing, and only the editor used last', () => {
+        const first = clocked();
+        const second = clocked();
+        const field = document.createElement('input');
+        document.body.appendChild(field);
+        expect(key('+', {}, field).defaultPrevented).toBe(false);
+
+        key('+');
+        expect([scaleOf(first.editor), scaleOf(second.editor)]).toEqual([0.625, 0.5]);
+        click(second.svg, 100, 100);
+        key('+');
+        expect([scaleOf(first.editor), scaleOf(second.editor)]).toEqual([0.625, 0.625]);
+    });
+
+    it('is off with keyboardControls: false or zoomControls: false', () => {
+        for (const off of [{ keyboardControls: false }, { zoomControls: false }]) {
+            const { editor } = clocked(off);
+            expect(key('+').defaultPrevented).toBe(false);
+            expect(editor.getView()).toEqual(WHOLE);
+            editor.destroy();
+        }
+    });
+});

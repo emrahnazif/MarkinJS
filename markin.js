@@ -30,6 +30,7 @@ const MarkinJS = (function () {
     const HANDLE_SLOP = 6; // extra screen px of grab area around a handle
     const NUDGE_COMMIT_MS = 800; // idle time after which a run of arrow-key nudges becomes one undo step
     const WHEEL_RUN_MS = 200; // wheel events closer together than this are one movement of the wheel or the fingers
+    const KEY_ZOOM = 1.25; // how much + and - zoom
     const WHEEL_LINE = 33; // pixels in one "line" of a wheel that reports lines: three lines are one notch
 
     // Every option: [default, kind]. A kind ending in "?" also accepts null.
@@ -2512,6 +2513,26 @@ const MarkinJS = (function () {
             return true;
         }
 
+        // + and - zoom around the middle of the view, Shift+1 shows the whole image and Shift+0 its
+        // real pixels. True when the view changed: a key that changes nothing is left to the page.
+        _viewKey(event) {
+            if (!this._pans() || event.ctrlKey || event.metaKey || event.altKey) return false;
+            const zoom = (scale) => {
+                const g = this._geometry();
+                if (!g) return false;
+                // Scale 1 here means the real pixels: one pixel of the image on one of the screen.
+                const s = scale === 1 ? this.view.scale / g.scale : this.view.scale * scale;
+                return this._zoomAt(s, g.left + (g.width * g.kx) / 2, g.top + (g.height * g.ky) / 2, g);
+            };
+            // The digits are read by where the keys are. With Shift they type other characters, and
+            // which ones depends on the keyboard: Shift+0 is "=" on a German or a Turkish one.
+            if (event.shiftKey && event.code === 'Digit1') return this.view.scale !== 1 && this.fit();
+            if (event.shiftKey && event.code === 'Digit0') return zoom(1);
+            if (event.key === '+' || event.key === '=' || event.code === 'NumpadAdd') return zoom(KEY_ZOOM);
+            if (event.key === '-' || event.code === 'NumpadSubtract') return zoom(1 / KEY_ZOOM);
+            return false;
+        }
+
         // The click the browser sends when a drag of the view is released is not a click.
         _swallowClick() {
             const stop = listen(
@@ -2745,6 +2766,10 @@ const MarkinJS = (function () {
             if (typeof event.key !== 'string' || isTypingTarget(event)) return;
             if (this._onSpace(event, true)) return;
             if (keyboardOwner() !== this) return;
+            if (this._viewKey(event)) {
+                event.preventDefault();
+                return;
+            }
 
             const mod = event.ctrlKey || event.metaKey;
             let key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
