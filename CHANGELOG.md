@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixed size) lost its height when the editor wrapped it, took its own shape and overflowed the box. The wrappers
   now pass the height on. The same happened in 0.2.0.
 
+### Changed
+- Releases are published through npm trusted publishing from the CI workflow, without a stored token.
+- The package and the docs point at the repository's address, `github.com/emrahnazif/MarkinJS`.
+
 ## [0.3.0] - 2026-11-11
 
 Zoom and pan are built in. The data format, the methods and the events of 0.2 are unchanged; "Upgrading from 0.2"
