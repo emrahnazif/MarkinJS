@@ -57,6 +57,7 @@ const MarkinJS = (function () {
         settleDelay: [250, 'delay'],
         zoomControls: [true, 'boolean'],
         panOnEmpty: [true, 'boolean'],
+        stepKeys: [false, 'boolean'],
         wheel: ['pan', 'wheel'],
         strict: [false, 'boolean'],
         silent: [false, 'boolean'],
@@ -1371,6 +1372,24 @@ const MarkinJS = (function () {
             }
             const box = extent(pointsOf(ann, hasBox(ann) ? ['bbox'] : ['polygon', 'keypoint']));
             return !!box && this._show(box.x1, box.y1, box.x2, box.y2, padding);
+        }
+
+        // Select the next (1) or the previous (-1) annotation, in the order of the list, and frame
+        // it. False at either end, where there is none to go to.
+        step(direction) {
+            if (this.dead) return false;
+            if (direction !== 1 && direction !== -1) {
+                this._problem('step: the direction must be 1 (next) or -1 (previous)');
+                return false;
+            }
+            this._settle();
+            const at = this.sel ? this.list.indexOf(this.byId.get(this.sel.key)) : -1;
+            const ann = this.list[at === -1 ? (direction === 1 ? 0 : this.list.length - 1) : at + direction];
+            if (!ann) return false;
+            this._select(String(ann.id), this._mainPart(ann), null);
+            // A select listener may have removed it again.
+            if (this.byId.has(String(ann.id)) && this.viewport) this.zoomTo(ann.id);
+            return true;
         }
 
         toImage(clientX, clientY) {
@@ -2794,6 +2813,11 @@ const MarkinJS = (function () {
                 }
                 return;
             }
+            if (this.opts.stepKeys && (key === 'n' || key === 'p') && !mod && !event.altKey && !event.shiftKey) {
+                // Not during a drag, which stepping would have to cancel.
+                if (!this.gesture && this.step(key === 'n' ? 1 : -1)) event.preventDefault();
+                return;
+            }
             if (!this.sel || this.gesture) return;
             if (key === 'Delete' || key === 'Backspace') {
                 event.preventDefault();
@@ -2854,6 +2878,7 @@ const MarkinJS = (function () {
         'zoomBy',
         'fit',
         'zoomTo',
+        'step',
         'toImage',
         'toClient',
         'getSVGElement',

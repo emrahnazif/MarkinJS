@@ -663,3 +663,121 @@ describe('zooming with the keyboard', () => {
         }
     });
 });
+
+describe('stepping through the annotations', () => {
+    // Small objects, far apart, in an order that is neither by size nor by position.
+    const OBJECTS = [
+        { id: 'c', bbox: [1400, 1000, 40, 20] },
+        { id: 'a', bbox: [100, 100, 20, 40] },
+        {
+            id: 'b',
+            segments: [
+                [700, 500],
+                [900, 500],
+                [800, 700]
+            ]
+        }
+    ];
+    const start = (options) => clocked({ annotations: OBJECTS, ...options });
+    const selected = (editor) => (editor.getSelection() || {}).id;
+
+    it('step() goes through the list in its own order and stops at the ends', () => {
+        const { editor } = start();
+        const seen = [];
+        while (editor.step(1)) seen.push(selected(editor));
+        expect(seen).toEqual(['c', 'a', 'b']);
+        expect(selected(editor)).toBe('b');
+        expect(editor.step(1)).toBe(false);
+
+        while (editor.step(-1)) seen.push(selected(editor));
+        expect(seen).toEqual(['c', 'a', 'b', 'a', 'c']);
+        expect(editor.step(-1)).toBe(false);
+        expect(selected(editor)).toBe('c');
+    });
+
+    it('starts from the last annotation when it goes backwards with nothing selected', () => {
+        const { editor } = start();
+        expect(editor.step(-1)).toBe(true);
+        expect(selected(editor)).toBe('b');
+        expect(clocked().editor.step(1)).toBe(false);
+    });
+
+    it('frames each annotation, and says so with the usual events', () => {
+        const { editor } = start();
+        const heard = [];
+        editor.on('select', (e) => heard.push(`select ${e.id} ${e.part}`));
+        editor.on('deselect', (e) => heard.push(`deselect ${e.id}`));
+        editor.step(1);
+        // 40 x 20 image pixels in 720 x 520 on screen.
+        expect(editor.getView().scale).toBe(18);
+        expect(editor.toClient(1420, 1010)).toEqual({ x: 420, y: 320 });
+        editor.step(1);
+        expect(editor.getView().scale).toBe(13);
+        editor.step(1);
+        expect(editor.getView()).toMatchObject({ scale: 2.6 });
+        expect(heard).toEqual(['select c bbox', 'deselect c', 'select a bbox', 'deselect a', 'select b polygon']);
+    });
+
+    it('continues from whatever is selected, also when that is one part of an annotation', () => {
+        const { editor } = start({
+            annotations: [...OBJECTS, { id: 'd', keypoints: [{ point: [5, 5] }, { point: [9, 9] }] }]
+        });
+        editor.select('d', 'keypoint', 1);
+        expect(editor.step(-1)).toBe(true);
+        expect(selected(editor)).toBe('b');
+        editor.select('a');
+        editor.step(1);
+        expect(selected(editor)).toBe('b');
+    });
+
+    it('needs a direction', () => {
+        const { editor, log } = start();
+        expect(editor.step()).toBe(false);
+        expect(editor.step(2)).toBe(false);
+        expect(log.length).toBe(2);
+        expect(selected(editor)).toBe(undefined);
+    });
+
+    it('n and p do it from the keyboard, when stepKeys is on', () => {
+        const { editor } = start({ stepKeys: true });
+        expect(key('n').defaultPrevented).toBe(true);
+        expect(selected(editor)).toBe('c');
+        key('N'); // Caps Lock
+        key('n');
+        expect(selected(editor)).toBe('b');
+        // At the end the key does nothing, and is not taken.
+        expect(key('n').defaultPrevented).toBe(false);
+        expect(selected(editor)).toBe('b');
+        expect(key('p').defaultPrevented).toBe(true);
+        expect(selected(editor)).toBe('a');
+        expect(editor.getView().scale).toBe(13);
+    });
+
+    it('n and p are plain letters unless stepKeys is on', () => {
+        const { editor } = start();
+        expect(key('n').defaultPrevented).toBe(false);
+        expect(key('p').defaultPrevented).toBe(false);
+        expect(editor.getSelection()).toBe(null);
+        expect(editor.getOptions().stepKeys).toBe(false);
+    });
+
+    it('the keys are left alone with a modifier, while typing, and during a drag', () => {
+        const { editor, svg } = start({ stepKeys: true });
+        const field = document.createElement('input');
+        document.body.appendChild(field);
+        for (const init of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true }]) {
+            expect(key('n', init).defaultPrevented).toBe(false);
+        }
+        expect(key('n', {}, field).defaultPrevented).toBe(false);
+        expect(editor.getSelection()).toBe(null);
+
+        editor.select('b');
+        const [x, y] = screenOf(svg, 800, 550);
+        press(svg.querySelector('[data-markin-part="polygon"]'), x, y);
+        move(x + 20, y);
+        expect(key('n').defaultPrevented).toBe(false);
+        release(x + 20, y);
+        expect(selected(editor)).toBe('b');
+        expect(editor.getAnnotation('b').segments[0]).toEqual([740, 500]);
+    });
+});

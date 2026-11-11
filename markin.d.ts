@@ -127,6 +127,8 @@ declare namespace MarkinJS {
         zoomControls?: boolean;
         /** A drag that starts on empty canvas moves the view, once it is zoomed in. Default `true`. */
         panOnEmpty?: boolean;
+        /** `n` and `p` select the next and the previous annotation and frame it, as `step()` does. Default `false`. */
+        stepKeys?: boolean;
         /**
          * What a plain wheel or two-finger scroll does: `'pan'` (default) moves the view, `'zoom'` zooms
          * towards the pointer. Ctrl / Cmd + wheel and a trackpad pinch always zoom.
@@ -270,6 +272,11 @@ declare namespace MarkinJS {
          * around it, in screen pixels. Default `40`.
          */
         zoomTo(id: string | number, settings?: { padding?: number }): boolean;
+        /**
+         * Select the next (`1`) or the previous (`-1`) annotation, in the order of the list, and frame it.
+         * `false` at either end. With nothing selected it starts from the first, or the last.
+         */
+        step(direction: 1 | -1): boolean;
         /** A point on screen (`clientX`, `clientY` of an event) as a point of the image. */
         toImage(clientX: number, clientY: number): Point | null;
         /** A point of the image as a point on screen, in the coordinates of `clientX` and `clientY`. */
