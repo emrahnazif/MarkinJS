@@ -485,7 +485,25 @@ const MarkinJS = (function () {
         return { x: at(parts[0] || '', cw - w), y: at(parts[1] || '', ch - h), width: w, height: h };
     }
 
-    // Wrap an <img> in a positioned container and lay an <svg> exactly over the drawn image.
+    // Zoom and pan are one CSS transform on a "stage" that holds the picture and the SVG, inside a
+    // "viewport" that clips it. Build the two around `subject`, in its place.
+    function wrapInStage(subject, blockLevel) {
+        const doc = subject.ownerDocument;
+        const viewport = doc.createElement('div');
+        viewport.className = 'markin-container';
+        viewport.style.cssText = `position:relative;display:${blockLevel ? 'block' : 'inline-block'};line-height:0`;
+        const stage = doc.createElement('div');
+        stage.className = 'markin-stage';
+        stage.style.cssText = 'position:relative';
+        subject.parentNode.insertBefore(viewport, subject);
+        viewport.appendChild(stage);
+        stage.appendChild(subject);
+        return { viewport, stage };
+    }
+
+    const BLOCK_LEVEL = /^(block|flex|grid|table|list-item|flow-root)$/;
+
+    // Wrap an <img> in a viewport and a stage, and lay an <svg> exactly over the drawn image.
     // The SVG's viewBox is the image's natural size, so annotations are in image pixels.
     function mountOverImage(image, onChange, note) {
         const doc = image.ownerDocument;
@@ -500,13 +518,7 @@ const MarkinJS = (function () {
         const px = (value) => parseFloat(value) || 0;
         const before = [image.offsetWidth, image.offsetHeight];
         const resized = () => image.offsetWidth !== before[0] || image.offsetHeight !== before[1];
-        const blockLevel = /^(block|flex|grid|table|list-item|flow-root)$/.test((styleOf() || {}).display || '');
-
-        const container = doc.createElement('div');
-        container.className = 'markin-container';
-        container.style.cssText = `position:relative;display:${blockLevel ? 'block' : 'inline-block'};line-height:0`;
-        parent.insertBefore(container, subject);
-        container.appendChild(subject);
+        const { viewport: container, stage } = wrapInStage(subject, BLOCK_LEVEL.test((styleOf() || {}).display || ''));
         // Wrapping must not change how the image is laid out; a percentage width is the usual casualty.
         if (resized()) {
             container.style.width = '100%';
@@ -523,7 +535,7 @@ const MarkinJS = (function () {
 
         const svg = svgEl(doc, 'svg', { class: 'markin-overlay', preserveAspectRatio: 'none' });
         svg.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;overflow:visible';
-        container.appendChild(svg);
+        stage.appendChild(svg);
 
         const sync = () => {
             const nw = image.naturalWidth;
@@ -577,7 +589,65 @@ const MarkinJS = (function () {
             if (observer) observer.disconnect();
             if (container.parentNode) container.replaceWith(subject);
         };
-        return { image, container, svg, sync, teardown };
+        return { image, container, stage, svg, sync, teardown };
+    }
+
+    // The viewport and stage for an editor on the host's own <svg>, or null when there are none:
+    // the editor then works as before, without zoom.
+    //
+    // A host that owns its markup (a framework, or an <svg> laid over a picture) marks the element
+    // to be zoomed with `data-markin-stage`; that element's parent is the viewport. Any other
+    // <svg> is wrapped, unless that would move or resize it.
+    function mountAroundSvg(svg, note) {
+        const marked = svg.parentElement ? svg.parentElement.closest('[data-markin-stage]') : null;
+        if (marked) {
+            const viewport = marked.parentElement;
+            if (!viewport) return null;
+            const saved = [marked.style.transform, marked.style.transformOrigin, viewport.style.overflow];
+            const teardown = () => {
+                [marked.style.transform, marked.style.transformOrigin, viewport.style.overflow] = saved;
+            };
+            return { container: viewport, stage: marked, teardown };
+        }
+        if (!svg.parentNode) return null;
+
+        const win = svg.ownerDocument.defaultView;
+        let style = null;
+        try {
+            style = win.getComputedStyle(svg);
+        } catch {
+            // Not rendered.
+        }
+        const refuse = () => {
+            note(
+                'zoom and pan are off: wrapping the <svg> would change its layout. Mark the element that holds it with data-markin-stage instead (see the README).'
+            );
+            return null;
+        };
+        // An <svg> laid over something else is positioned against an element the host chose.
+        if (style && /^(absolute|fixed|sticky)$/.test(style.position || '')) return refuse();
+
+        const box = () => svg.getBoundingClientRect();
+        const before = box();
+        const moved = () => {
+            const now = box();
+            return ['left', 'top', 'width', 'height'].some((side) => Math.abs(now[side] - before[side]) > 0.5);
+        };
+        const { viewport, stage } = wrapInStage(svg, BLOCK_LEVEL.test((style && style.display) || ''));
+        // A percentage size has to find the same box to refer to.
+        if (moved()) viewport.style.width = '100%';
+        if (moved()) {
+            viewport.style.height = '100%';
+            stage.style.height = '100%';
+        }
+        const teardown = () => {
+            if (viewport.parentNode) viewport.replaceWith(svg);
+        };
+        if (moved()) {
+            teardown();
+            return refuse();
+        }
+        return { container: viewport, stage, teardown };
     }
 
     // ------------------------------------------------------------------ editor
@@ -603,15 +673,13 @@ const MarkinJS = (function () {
 
             // The options are settled before the page is touched, so a strict-mode error leaves no trace.
             this.target = target;
-            this.host =
-                target.localName === 'img'
-                    ? mountOverImage(
-                          target,
-                          () => this.refresh(),
-                          (message) => this._log('warn', message)
-                      )
-                    : null;
+            const warn = (message) => this._log('warn', message);
+            this.host = target.localName === 'img' ? mountOverImage(target, () => this.refresh(), warn) : null;
             this.svg = this.host ? this.host.svg : target;
+            // What zoom and pan work on. An <svg> that could not be given a viewport has no view.
+            this.frame = this.host || mountAroundSvg(target, warn);
+            this.viewport = this.frame ? this.frame.container : null;
+            this.stage = this.frame ? this.frame.stage : null;
             // The SVG may live in another document than this script (an iframe, a popup).
             this.doc = this.svg.ownerDocument;
             this.win = this.doc.defaultView || window;
@@ -706,7 +774,7 @@ const MarkinJS = (function () {
             for (const layer of [this.shapesLayer, this.pointsLayer, this.uiLayer]) layer.textContent = '';
             if (registry.get(this.target) === this) registry.delete(this.target);
             this.svg.style.touchAction = this.savedTouchAction;
-            if (this.host) this.host.teardown();
+            if (this.frame) this.frame.teardown();
             this.list = [];
             this.byId.clear();
             this.dom.clear();
@@ -1512,7 +1580,7 @@ const MarkinJS = (function () {
         }
 
         getContainerElement() {
-            return this.host ? this.host.container : null;
+            return this.viewport;
         }
 
         // ---- drawing

@@ -36,8 +36,47 @@ export const SVG_NS = 'http://www.w3.org/2000/svg';
 export const BOX = { id: 'A', class_id: 1, bbox: [100, 100, 200, 100] };
 export const OTHER = { id: 'B', bbox: [400, 300, 100, 100] };
 
-// jsdom does no layout and has no getScreenCTM(), which is how the library measures the SVG.
-// This stand-in maps the viewBox onto the box a test supplied with setBox(), as a browser would.
+// jsdom does no layout, so the tests supply it. A test gives an element its box with setBox();
+// the viewport and stage the library builds around an <svg> take the box of that <svg>. A CSS
+// transform the library writes on an element (translate and scale about its top-left corner)
+// moves the boxes of everything inside it, as it would in a browser.
+const boxes = new WeakMap();
+const NO_BOX = { left: 0, top: 0, width: 0, height: 0, x: 0, y: 0, right: 0, bottom: 0 };
+
+function ownBox(el) {
+    if (boxes.has(el)) return boxes.get(el);
+    if (el.classList && (el.classList.contains('markin-container') || el.classList.contains('markin-stage'))) {
+        const svg = el.querySelector('svg');
+        return (svg && boxes.get(svg)) || null;
+    }
+    return null;
+}
+
+function transformOf(el) {
+    const text = (el.style && el.style.transform) || '';
+    const found = /translate\(\s*([-\d.e+]+)px,\s*([-\d.e+]+)px\)\s*scale\(\s*([-\d.e+]+)\s*\)/.exec(text);
+    return found ? { x: Number(found[1]), y: Number(found[2]), scale: Number(found[3]) } : null;
+}
+
+function layoutRect() {
+    const box = ownBox(this);
+    if (!box) return NO_BOX;
+    let { left, top, width, height } = box;
+    for (let el = this; el && el.nodeType === 1; el = el.parentNode) {
+        const t = transformOf(el);
+        const origin = t && ownBox(el);
+        if (!origin) continue;
+        left = origin.left + t.x + (left - origin.left) * t.scale;
+        top = origin.top + t.y + (top - origin.top) * t.scale;
+        width *= t.scale;
+        height *= t.scale;
+    }
+    return { left, top, width, height, x: left, y: top, right: left + width, bottom: top + height };
+}
+window.Element.prototype.getBoundingClientRect = layoutRect;
+
+// jsdom has no getScreenCTM() either. This stand-in maps the viewBox onto the box the <svg> has
+// on screen, as Chrome and Firefox do.
 function screenCTM() {
     const rect = this.getBoundingClientRect();
     if (!(rect.width > 0 && rect.height > 0)) return null;
@@ -68,18 +107,12 @@ export function makeSvg({ viewBox = '0 0 800 600', box = { left: 0, top: 0, widt
     return svg;
 }
 
-export function setBox(svg, { left = 0, top = 0, width, height }) {
-    svg.getScreenCTM = screenCTM; // also for an <svg> of another document, which has its own prototype
-    svg.getBoundingClientRect = () => ({
-        left,
-        top,
-        width,
-        height,
-        x: left,
-        y: top,
-        right: left + width,
-        bottom: top + height
-    });
+// Give an element its box on screen, before any zoom.
+export function setBox(el, { left = 0, top = 0, width, height }) {
+    boxes.set(el, { left, top, width, height });
+    // An element of another document has prototypes of its own.
+    el.getBoundingClientRect = layoutRect;
+    if (el.localName === 'svg') el.getScreenCTM = screenCTM;
 }
 
 const editors = [];
