@@ -300,6 +300,10 @@ MarkinJS.denormalize(annotations, width, height);  // fractions -&gt; pixels</co
                                 Subscribing to an event name that does not exist is reported, so a typo does not fail silently.
                             </p>
                             <p>
+                                A listener may call back into the editor. <code>createAnnotation()</code> reports its <code>change</code> first and selects the new
+                                annotation after that, so a <code>select</code> listener can already edit or delete it.
+                            </p>
+                            <p>
                                 A press on an annotation does not bubble as <code>pointerdown</code> or <code>mousedown</code>;
                                 listen for <code>click</code>, or for the editor's own <code>select</code>. A press on empty canvas bubbles as usual.
                             </p>

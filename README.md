@@ -174,6 +174,9 @@ logged. Pass `strict: true` to get a `TypeError` instead.
 
 `position` is in image pixels. A listener that throws is reported and skipped; it cannot interrupt the editor.
 
+A listener may call back into the editor. `createAnnotation()` reports its `change` first and selects the new
+annotation after that, so a `select` listener can already edit or delete it.
+
 A press on an annotation does not bubble as `pointerdown` or `mousedown`; listen for `click`, or for the editor's own
 `select`, if the rest of your page needs to know about it. A press on empty canvas bubbles as usual.
 

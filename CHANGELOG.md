@@ -26,7 +26,7 @@ A rewrite of the library. The API is smaller and **not compatible with 0.1**; se
   arrow key is one undo step.
 - Colours come from `options.colors` by `class_id`. Binding, containment, deletion rules and the skeleton
   are editor options rather than per-annotation settings.
-- Tests run real pointer and keyboard interaction (265 tests).
+- Tests run real pointer and keyboard interaction (270 tests).
 
 ### Added
 - `load()`, `clear()`, `select()`, `getSelection()`, `getAnnotation()`, `canUndo()`, `canRedo()`,
