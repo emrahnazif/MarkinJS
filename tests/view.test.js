@@ -2,13 +2,19 @@ import { describe, it, expect } from 'vitest';
 import {
     MarkinJS,
     makeEditor,
+    makeImage,
+    makeStage,
     track,
     setBox,
+    stageOf,
     screenOf,
+    pointer,
     press,
     move,
     release,
     click,
+    drag,
+    wheel,
     key,
     keyUp,
     bboxEl,
@@ -16,16 +22,14 @@ import {
     keypointEl,
     handleEl,
     num,
+    wait,
     nextFrame,
     BOX,
-    SVG_NS
+    HALF,
+    WHOLE,
+    LAID_OVER
 } from './setup.js';
 
-// A 1600 x 1200 image shown at 800 x 600, 20px from the top-left of the page:
-// at rest one image pixel is half a pixel on screen.
-const HALF = { viewBox: '0 0 1600 1200', box: { left: 20, top: 20, width: 800, height: 600 } };
-
-const stageOf = (editor) => editor.getContainerElement().firstChild;
 // What the library wrote on the page for the current view.
 const written = (editor) => ({
     transform: stageOf(editor).style.transform,
@@ -35,7 +39,7 @@ const written = (editor) => ({
 describe('the view at rest', () => {
     it('is the whole image, with nothing written on the page', () => {
         const { editor } = makeEditor({}, HALF);
-        expect(editor.getView()).toEqual({ x: 0, y: 0, width: 1600, height: 1200, scale: 0.5 });
+        expect(editor.getView()).toEqual(WHOLE);
         expect(written(editor)).toEqual({ transform: '', overflow: '' });
     });
 
@@ -47,7 +51,7 @@ describe('the view at rest', () => {
         editor.zoomBy(3);
         expect(written(editor).overflow).toBe('hidden');
         expect(editor.fit()).toBe(true);
-        expect(editor.getView()).toEqual({ x: 0, y: 0, width: 1600, height: 1200, scale: 0.5 });
+        expect(editor.getView()).toEqual(WHOLE);
         expect(written(editor)).toEqual({ transform: '', overflow: '' });
     });
 });
@@ -312,56 +316,38 @@ describe('the view and the page', () => {
     });
 
     it('goes back to the whole image when the picture is replaced', () => {
-        const image = document.createElement('img');
-        const size = { width: 1600, height: 1200 };
-        Object.defineProperty(image, 'naturalWidth', { get: () => size.width });
-        Object.defineProperty(image, 'naturalHeight', { get: () => size.height });
-        document.body.appendChild(image);
+        const { image, load } = makeImage({ width: 1600, height: 1200 });
         const editor = track(MarkinJS.create(image, { silent: true }));
         setBox(editor.getSVGElement(), HALF.box);
         editor.zoomBy(2);
         expect(editor.getView()).toEqual({ x: 400, y: 300, width: 800, height: 600, scale: 1 });
 
         // The browser reports the load of an image it already had: the same picture, the same view.
-        image.dispatchEvent(new Event('load'));
+        load(1600, 1200);
         expect(editor.getView()).toEqual({ x: 400, y: 300, width: 800, height: 600, scale: 1 });
 
-        size.width = 800;
-        size.height = 600;
-        image.dispatchEvent(new Event('load'));
+        load(800, 600);
         expect(editor.getView()).toEqual({ x: 0, y: 0, width: 800, height: 600, scale: 1 });
         expect(written(editor)).toEqual({ transform: '', overflow: '' });
     });
 
     it('zooms an <svg> that has no viewBox, in its own pixels', () => {
-        const real = window.getComputedStyle;
-        try {
-            const { editor, svg } = makeEditor({}, { viewBox: null });
-            // Without a viewBox one unit is one CSS pixel, so the size CSS gives the <svg> matters.
-            window.getComputedStyle = (el) => (el === svg ? { width: '800px', height: '600px' } : real(el));
-            expect(editor.getView()).toEqual({ x: 0, y: 0, width: 800, height: 600, scale: 1 });
-            editor.zoomBy(2);
-            expect(editor.getView()).toEqual({ x: 200, y: 150, width: 400, height: 300, scale: 2 });
-        } finally {
-            window.getComputedStyle = real;
-        }
+        // Without a viewBox one unit is one CSS pixel, so the size CSS gives the <svg> matters.
+        const { editor } = makeEditor({}, { viewBox: null, style: { width: '800px', height: '600px' } });
+        expect(editor.getView()).toEqual({ x: 0, y: 0, width: 800, height: 600, scale: 1 });
+        editor.zoomBy(2);
+        expect(editor.getView()).toEqual({ x: 200, y: 150, width: 400, height: 300, scale: 2 });
     });
 
     it('has no view of an image that has not arrived yet', () => {
-        const image = document.createElement('img');
-        const size = { width: 0, height: 0 };
-        Object.defineProperty(image, 'naturalWidth', { get: () => size.width });
-        Object.defineProperty(image, 'naturalHeight', { get: () => size.height });
-        document.body.appendChild(image);
+        const { image, load } = makeImage({ width: 0, height: 0 });
         const editor = track(MarkinJS.create(image, { silent: true }));
         setBox(editor.getSVGElement(), HALF.box);
         expect(editor.getView()).toBe(null);
         expect(editor.zoomBy(2)).toBe(false);
 
-        size.width = 1600;
-        size.height = 1200;
-        image.dispatchEvent(new Event('load'));
-        expect(editor.getView()).toEqual({ x: 0, y: 0, width: 1600, height: 1200, scale: 0.5 });
+        load(1600, 1200);
+        expect(editor.getView()).toEqual(WHOLE);
     });
 
     it('has no view to speak of before the page is laid out', () => {
@@ -385,7 +371,6 @@ describe('the view and the page', () => {
 });
 
 describe('viewchange and viewsettle', () => {
-    const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     // An editor whose view events are collected from the start. The view settles after 30ms.
     function watched(options, svgOptions = HALF) {
         const made = makeEditor({ settleDelay: 30, ...options }, svgOptions);
@@ -395,7 +380,6 @@ describe('viewchange and viewsettle', () => {
         made.editor.on('viewsettle', (view) => made.settles.push(view));
         return made;
     }
-    const WHOLE = { x: 0, y: 0, width: 1600, height: 1200, scale: 0.5 };
 
     it('report the first view, once each', async () => {
         const { changes, settles } = watched();
@@ -484,12 +468,9 @@ describe('viewchange and viewsettle', () => {
     });
 
     it('viewsettle reports a new picture, even one of the same size', async () => {
-        const image = document.createElement('img');
+        const { image } = makeImage({ width: 1600, height: 1200 });
         let address = 'first.jpg';
-        Object.defineProperty(image, 'naturalWidth', { get: () => 1600 });
-        Object.defineProperty(image, 'naturalHeight', { get: () => 1200 });
         Object.defineProperty(image, 'currentSrc', { get: () => address });
-        document.body.appendChild(image);
         const editor = track(MarkinJS.create(image, { silent: true, settleDelay: 30 }));
         setBox(editor.getSVGElement(), HALF.box);
         const settles = [];
@@ -541,22 +522,12 @@ describe('viewchange and viewsettle', () => {
 
 describe('a stage the page marked', () => {
     // A 1000 x 600 viewport with an 800 x 600 picture centred in it.
-    function centred(prepare) {
-        const viewport = document.createElement('section');
-        const stage = document.createElement('div');
-        stage.setAttribute('data-markin-stage', '');
-        if (prepare) prepare(viewport, stage);
-        const svg = document.createElementNS(SVG_NS, 'svg');
-        svg.setAttribute('viewBox', '0 0 800 600');
-        stage.appendChild(svg);
-        viewport.appendChild(stage);
-        document.body.appendChild(viewport);
-        setBox(viewport, { left: 0, top: 0, width: 1000, height: 600 });
-        setBox(stage, { left: 100, top: 0, width: 800, height: 600 });
-        setBox(svg, { left: 100, top: 0, width: 800, height: 600 });
-        const editor = track(MarkinJS.create(svg, { silent: true }));
-        return { editor, viewport, stage };
-    }
+    const centred = (prepare) =>
+        makeStage({
+            viewport: { left: 0, top: 0, width: 1000, height: 600 },
+            picture: { left: 100, top: 0, width: 800, height: 600 },
+            prepare
+        });
 
     it('grows a picture that is smaller than the viewport from where it stands', () => {
         const { editor, stage, viewport } = centred();
@@ -595,14 +566,11 @@ describe('a stage the page marked', () => {
 describe('a picture that its own box crops', () => {
     it('is never shown beyond what the page shows of it at rest', () => {
         // An 800 x 300 picture in a 400 x 300 window that shows its middle, as object-fit: cover does.
-        const viewport = document.createElement('section');
-        viewport.innerHTML = '<div data-markin-stage><svg viewBox="0 0 800 300"></svg></div>';
-        document.body.appendChild(viewport);
-        const stage = viewport.firstChild;
-        setBox(viewport, { left: 0, top: 0, width: 400, height: 300 });
-        setBox(stage, { left: -200, top: 0, width: 800, height: 300 });
-        setBox(stage.firstChild, { left: -200, top: 0, width: 800, height: 300 });
-        const editor = track(MarkinJS.create(stage.firstChild, { silent: true }));
+        const { editor } = makeStage({
+            viewBox: '0 0 800 300',
+            viewport: { left: 0, top: 0, width: 400, height: 300 },
+            picture: { left: -200, top: 0, width: 800, height: 300 }
+        });
         expect(editor.getView()).toEqual({ x: 200, y: 0, width: 400, height: 300, scale: 1 });
 
         // Asked for the left end, which the window cuts off: the view stops where the window did,
@@ -617,18 +585,19 @@ describe('a picture that its own box crops', () => {
 describe('a viewport the page shares with other things', () => {
     // The page's own viewport, with a toolbar in it next to the stage.
     function shared() {
-        const viewport = document.createElement('section');
-        viewport.style.cursor = 'crosshair';
-        viewport.innerHTML =
-            '<div data-markin-stage style="user-select: text;"><svg viewBox="0 0 800 600"></svg></div><nav><button>tool</button></nav>';
-        document.body.appendChild(viewport);
-        const stage = viewport.firstChild;
-        const svg = stage.firstChild;
-        setBox(viewport, { left: 0, top: 0, width: 800, height: 600 });
-        setBox(stage, { left: 0, top: 0, width: 800, height: 600 });
-        setBox(svg, { left: 0, top: 0, width: 800, height: 600 });
-        const editor = track(MarkinJS.create(svg, { silent: true, annotations: [BOX] }));
-        return { editor, viewport, stage, svg, button: viewport.querySelector('button') };
+        const box = { left: 0, top: 0, width: 800, height: 600 };
+        const made = makeStage({
+            viewport: box,
+            picture: box,
+            extra: '<nav><button>tool</button></nav>',
+            options: { annotations: [BOX] },
+            // Styles of the page's own, which the editor borrows and has to give back.
+            prepare(viewport, stage) {
+                viewport.style.cursor = 'crosshair';
+                stage.style.userSelect = 'text';
+            }
+        });
+        return { ...made, button: made.viewport.querySelector('button') };
     }
 
     it('leaves what the page put there to the page', async () => {
@@ -643,9 +612,8 @@ describe('a viewport the page shares with other things', () => {
         press(button, 400, 300);
         move(300, 250);
         release(300, 250);
-        const turned = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -10, ctrlKey: true });
-        button.dispatchEvent(turned);
-        button.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 400, clientY: 300 }));
+        const turned = wheel(button, 400, 300, { deltaY: -10, ctrlKey: true });
+        pointer('pointermove', button, 400, 300, { buttons: 0 });
         await nextFrame();
         expect(turned.defaultPrevented).toBe(false);
         expect(heard).toEqual([]);
@@ -675,21 +643,13 @@ describe('a viewport the page shares with other things', () => {
 
 describe('an editor that could not be given a viewport', () => {
     it('edits as before and has no view', () => {
-        const real = window.getComputedStyle;
-        try {
-            const svg = document.createElementNS(SVG_NS, 'svg');
-            svg.setAttribute('viewBox', '0 0 800 600');
-            document.body.appendChild(svg);
-            setBox(svg, { left: 0, top: 0, width: 800, height: 600 });
-            window.getComputedStyle = (el) => (el === svg ? { position: 'absolute' } : real(el));
-            const editor = track(MarkinJS.create(svg, { silent: true, annotations: [BOX] }));
-            expect(editor.getView()).toBe(null);
-            expect(editor.zoomBy(2)).toBe(false);
-            expect(editor.fit()).toBe(false);
-            expect(editor.toImage(100, 100)).toEqual({ x: 100, y: 100 });
-        } finally {
-            window.getComputedStyle = real;
-        }
+        const { editor } = makeEditor({ annotations: [BOX] }, LAID_OVER);
+        expect(editor.getContainerElement()).toBe(null);
+        expect(editor.getView()).toBe(null);
+        expect(editor.zoomBy(2)).toBe(false);
+        expect(editor.fit()).toBe(false);
+        expect(editor.toImage(100, 100)).toEqual({ x: 100, y: 100 });
+        expect(editor.getAnnotations()).toEqual([BOX]);
     });
 });
 
@@ -716,14 +676,7 @@ describe('editing while zoomed in', () => {
                 made.editor.zoomBy(zoom, { x: 800, y: 600 });
                 expect(made.editor.getView().scale).toBe(zoom / 2);
                 // Drag `target` from one image point to another, in two moves.
-                made.pull = (target, from, to) => {
-                    const a = screenOf(made.svg, from[0], from[1]);
-                    const b = screenOf(made.svg, to[0], to[1]);
-                    press(target, a[0], a[1]);
-                    move((a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
-                    move(b[0], b[1]);
-                    release(b[0], b[1]);
-                };
+                made.pull = (target, from, to) => drag(target, screenOf(made.svg, ...from), screenOf(made.svg, ...to));
                 return made;
             };
 
