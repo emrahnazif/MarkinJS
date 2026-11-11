@@ -39,6 +39,7 @@ const MarkinJS = (function () {
         strokeWidth: [2, 'positive'],
         keypointRadius: [5, 'positive'],
         handleRadius: [5, 'positive'],
+        maxScale: [32, 'positive'],
         strict: [false, 'boolean'],
         silent: [false, 'boolean'],
         logger: [null, 'function?']
@@ -109,6 +110,49 @@ const MarkinJS = (function () {
     const toBbox = (box) => [box.x1, box.y1, box.x2 - box.x1, box.y2 - box.y1];
     const deselected = (sel) => ({ id: sel.id, part: sel.part, index: sel.index });
     const NO_LIMIT = Object.freeze({ x1: -Infinity, y1: -Infinity, x2: Infinity, y2: Infinity });
+
+    // Client pixels -> SVG user space, through the inverse of matrix `m`.
+    function unmap(m, clientX, clientY) {
+        const det = m.a * m.d - m.b * m.c;
+        const x = clientX - m.e;
+        const y = clientY - m.f;
+        return { x: (m.d * x - m.c * y) / det, y: (m.a * y - m.b * x) / det };
+    }
+
+    // Keep a view within its limits. `g` is the geometry it is measured in (see Editor._geometry).
+    //
+    // The scale runs from 1, the picture as the page lays it out, up to `g.maxScale`. Along each
+    // axis the picture then either still fits in the viewport, and stays where the layout had it
+    // (centred, if it was centred), or it is larger, and can be moved until an edge of it comes
+    // `slack` pixels into view: enough to reach a handle that sits on the edge.
+    function clampView(scale, x, y, g, slack) {
+        const s = clamp(scale, 1, g.maxScale);
+        const along = (t, size, o, from, to) => {
+            // Nothing outside what the viewport shows at rest can ever be seen: an image cropped
+            // by its own box stays cropped.
+            const a = Math.max(from, -o);
+            const b = Math.min(to, size - o);
+            if (!(b > a)) return 0;
+            const length = (b - a) * s;
+            if (length <= size) {
+                const spare = size - (b - a);
+                const share = spare > 1e-6 ? (o + a) / spare : 0.5;
+                return share * (size - length) - o - s * a;
+            }
+            const give = Math.min(slack, (length - size) / 2);
+            return clamp(t, size - give - o - s * b, give - o - s * a);
+        };
+        // Whole thousandths: what is written to the page and what is remembered are the same number.
+        const round = (v, digits) => {
+            const n = Number(v.toFixed(digits));
+            return Math.abs(n) < 1e-6 ? 0 : n;
+        };
+        return {
+            scale: round(s, 6),
+            x: round(along(x, g.width, g.ox, g.x1, g.x2), 3),
+            y: round(along(y, g.height, g.oy, g.y1, g.y2), 3)
+        };
+    }
 
     // Limit a translation `d` of the interval [a, b] so it stays inside [A, B].
     // An interval too large to fit is kept covering [A, B] instead.
@@ -537,10 +581,16 @@ const MarkinJS = (function () {
         svg.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;overflow:visible';
         stage.appendChild(svg);
 
+        let shown = null; // the picture last seen: its address and size
         const sync = () => {
             const nw = image.naturalWidth;
             const nh = image.naturalHeight;
             const loaded = nw > 0 && nh > 0;
+            // A `load` event alone does not mean another picture: the browser also sends one,
+            // late, for an image it already had.
+            const picture = loaded ? `${image.currentSrc || image.src} ${nw} ${nh}` : shown;
+            const fresh = shown !== null && picture !== shown;
+            shown = picture;
             if (loaded) svg.setAttribute('viewBox', `0 0 ${nw} ${nh}`);
             svg.style.visibility = loaded ? '' : 'hidden';
 
@@ -576,7 +626,7 @@ const MarkinJS = (function () {
                 }
             }
             Object.assign(svg.style, place);
-            onChange();
+            onChange(fresh);
         };
 
         const stopLoad = listen(image, 'load', sync);
@@ -607,7 +657,7 @@ const MarkinJS = (function () {
             const teardown = () => {
                 [marked.style.transform, marked.style.transformOrigin, viewport.style.overflow] = saved;
             };
-            return { container: viewport, stage: marked, teardown };
+            return { container: viewport, stage: marked, saved, teardown };
         }
         if (!svg.parentNode) return null;
 
@@ -674,7 +724,8 @@ const MarkinJS = (function () {
             // The options are settled before the page is touched, so a strict-mode error leaves no trace.
             this.target = target;
             const warn = (message) => this._log('warn', message);
-            this.host = target.localName === 'img' ? mountOverImage(target, () => this.refresh(), warn) : null;
+            this.host =
+                target.localName === 'img' ? mountOverImage(target, (fresh) => this._layoutChanged(fresh), warn) : null;
             this.svg = this.host ? this.host.svg : target;
             // What zoom and pan work on. An <svg> that could not be given a viewport has no view.
             this.frame = this.host || mountAroundSvg(target, warn);
@@ -691,6 +742,8 @@ const MarkinJS = (function () {
             this.sel = null; // { key, id, part, index }
             this.gesture = null;
             this.unit = 1; // SVG user units per screen pixel
+            this.view = { scale: 1, x: 0, y: 0 }; // the stage's transform: its scale, and where it is moved to
+            this.stageSize = null; // the size of the stage the view was last limited for
             this.history = { states: [[]], index: 0 };
             this.nudged = null; // id with arrow-key moves that are not committed yet
             this.nudgeTimer = 0;
@@ -741,7 +794,7 @@ const MarkinJS = (function () {
             // the editor. A second observer here would only chase the first one.
             const Observer = this.win.ResizeObserver;
             if (!this.host && typeof Observer === 'function') {
-                const observer = new Observer(() => this.refresh());
+                const observer = new Observer(() => this._layoutChanged());
                 observer.observe(svg);
                 this.cleanup.push(() => observer.disconnect());
             }
@@ -903,7 +956,8 @@ const MarkinJS = (function () {
             } catch {
                 // An element that is not rendered has no style to read.
             }
-            const px = (name) => (style && parseFloat(style[name])) || 0;
+            // A computed length is in pixels; anything else means the element is not laid out.
+            const px = (name) => (style && /px$/.test(style[name]) && parseFloat(style[name])) || 0;
             const left = px('borderLeftWidth') + px('paddingLeft');
             const top = px('borderTopWidth') + px('paddingTop');
             const right = px('borderRightWidth') + px('paddingRight');
@@ -944,17 +998,17 @@ const MarkinJS = (function () {
                 c: 0,
                 d: sy * ky,
                 e: rect.left + (left + ox) * kx,
-                f: rect.top + (top + oy) * ky
+                f: rect.top + (top + oy) * ky,
+                // Screen pixels per layout pixel, when the size CSS gives the <svg> could be read.
+                kx,
+                ky,
+                sized: layoutW > 0 && layoutH > 0
             };
         }
 
         _toLocal(clientX, clientY) {
             const m = this._matrix();
-            if (!m) return { x: clientX, y: clientY };
-            const det = m.a * m.d - m.b * m.c;
-            const x = clientX - m.e;
-            const y = clientY - m.f;
-            return { x: (m.d * x - m.c * y) / det, y: (m.a * y - m.b * x) / det };
+            return m ? unmap(m, clientX, clientY) : { x: clientX, y: clientY };
         }
 
         // Re-read how many SVG units one screen pixel covers. True when it changed noticeably.
@@ -969,13 +1023,255 @@ const MarkinJS = (function () {
             return true;
         }
 
-        refresh() {
+        // Handles and outlines take the size the canvas now has on screen.
+        _remeasure() {
             if (!this.dead && this._measure()) this._rescale();
+        }
+
+        refresh() {
+            this._layoutChanged();
         }
 
         _onResize() {
             if (this.host) this.host.sync();
-            else this.refresh();
+            else this._layoutChanged();
+        }
+
+        // The canvas changed size or place on the page, or (`fresh`) shows another picture.
+        _layoutChanged(fresh) {
+            if (this.dead) return;
+            if (fresh) this._resetView();
+            this._remeasure();
+            const g = this._geometry();
+            if (!g) return;
+            const v = this.view;
+            if (v.scale > g.maxScale) {
+                // The limit came down: zoom out around the middle of what is shown.
+                this._zoomAt(g.maxScale, g.left + (g.width * g.kx) / 2, g.top + (g.height * g.ky) / 2, g);
+                return;
+            }
+            // A view that is zoomed in keeps showing the same part of the picture.
+            const was = this.stageSize;
+            const x = was && was[0] > 0 ? (v.x * g.stageWidth) / was[0] : v.x;
+            const y = was && was[1] > 0 ? (v.y * g.stageHeight) / was[1] : v.y;
+            this._setView(v.scale, x, y, g);
+        }
+
+        // ---- view: zoom and pan
+
+        // What the view is worked out from, measured now. Null while there is no viewport or the
+        // page is not laid out. Lengths are layout pixels of the viewport unless they say otherwise.
+        _geometry() {
+            const vp = this.viewport;
+            if (this.dead || !vp) return null;
+            const m = this._matrix();
+            const box = vp.getBoundingClientRect();
+            if (!m || !(box.width > 0 && box.height > 0)) return null;
+            // Scaled by the page around the editor, a layout pixel is `kx` by `ky` pixels on screen.
+            // The <svg> knows exactly; it is inside the stage, so its own figure includes the view.
+            // The viewport's size is the fallback, and that is rounded to whole pixels.
+            const v = this.view;
+            const kx = m.sized ? m.kx / v.scale : vp.offsetWidth > 0 ? box.width / vp.offsetWidth : 1;
+            const ky = m.sized ? m.ky / v.scale : vp.offsetHeight > 0 ? box.height / vp.offsetHeight : 1;
+            // What is shown is the inside of the viewport's border.
+            const left = box.left + (vp.clientLeft || 0) * kx;
+            const top = box.top + (vp.clientTop || 0) * ky;
+            const width = box.width / kx - (vp.offsetWidth > 0 ? vp.offsetWidth - vp.clientWidth : 0);
+            const height = box.height / ky - (vp.offsetHeight > 0 ? vp.offsetHeight - vp.clientHeight : 0);
+            // Where the stage starts when the view is at rest ...
+            const stage = this.stage.getBoundingClientRect();
+            const ox = (stage.left - left) / kx - v.x;
+            const oy = (stage.top - top) / ky - v.y;
+            // ... and the picture, in the stage's own pixels, which no view changes.
+            const vb = this._viewBox();
+            const own = this.svg.getBoundingClientRect();
+            const image = vb || { x: 0, y: 0, w: own.width / Math.abs(m.a), h: own.height / Math.abs(m.d) };
+            const xs = [];
+            const ys = [];
+            for (const [px, py] of [
+                [image.x, image.y],
+                [image.x + image.w, image.y],
+                [image.x, image.y + image.h],
+                [image.x + image.w, image.y + image.h]
+            ]) {
+                xs.push(((m.a * px + m.c * py + m.e - left) / kx - ox - v.x) / v.scale);
+                ys.push(((m.b * px + m.d * py + m.f - top) / ky - oy - v.y) / v.scale);
+            }
+            // Screen pixels per image pixel, now and with the view at rest.
+            const scale = Math.sqrt(Math.abs(m.a * m.d - m.b * m.c));
+            return {
+                m,
+                kx,
+                ky,
+                left,
+                top,
+                width,
+                height,
+                ox,
+                oy,
+                x1: Math.min(...xs),
+                x2: Math.max(...xs),
+                y1: Math.min(...ys),
+                y2: Math.max(...ys),
+                image,
+                scale,
+                // Zoomed out, the limit is the picture as the page lays it out, however large that is.
+                maxScale: Math.max(1, (this.opts.maxScale * v.scale) / scale),
+                stageWidth: stage.width / (kx * v.scale),
+                stageHeight: stage.height / (ky * v.scale)
+            };
+        }
+
+        // An image point in the stage's own pixels.
+        _onStage(g, x, y) {
+            const v = this.view;
+            const m = g.m;
+            return {
+                x: ((m.a * x + m.c * y + m.e - g.left) / g.kx - g.ox - v.x) / v.scale,
+                y: ((m.b * x + m.d * y + m.f - g.top) / g.ky - g.oy - v.y) / v.scale
+            };
+        }
+
+        // Move the view, within its limits. True when that changed it.
+        _setView(scale, x, y, g = this._geometry()) {
+            if (!g) return false;
+            this.stageSize = [g.stageWidth, g.stageHeight];
+            // The slack is the width of a handle, which is a size on screen.
+            const slack = (2 * this.opts.handleRadius + this.opts.strokeWidth) / g.kx;
+            const next = clampView(scale, x, y, g, slack);
+            const v = this.view;
+            if (next.scale === v.scale && next.x === v.x && next.y === v.y) return false;
+            this.view = next;
+            this._writeView();
+            // Handles and outlines follow in the same frame.
+            this._remeasure();
+            return true;
+        }
+
+        _writeView() {
+            const { scale, x, y } = this.view;
+            const rest = scale === 1 && x === 0 && y === 0;
+            const saved = this.frame.saved || ['', '', ''];
+            this.stage.style.transformOrigin = rest ? saved[1] : '0 0';
+            this.stage.style.transform = rest ? saved[0] : `translate(${x}px, ${y}px) scale(${scale})`;
+            // At rest nothing is clipped, so a handle on the edge of the picture is drawn whole.
+            // Zoomed in, the viewport is a window onto the stage.
+            this.viewport.style.overflow = rest ? saved[2] : 'hidden';
+        }
+
+        _resetView() {
+            if (!this.viewport) return;
+            this.view = { scale: 1, x: 0, y: 0 };
+            this.stageSize = null;
+            this._writeView();
+        }
+
+        // Zoom to `scale`, keeping what is under the client point (clientX, clientY) where it is.
+        _zoomAt(scale, clientX, clientY, g = this._geometry()) {
+            if (!g) return false;
+            const v = this.view;
+            const s = clamp(scale, 1, g.maxScale);
+            // The point in viewport pixels, counted from where the stage starts at rest.
+            const ax = (clientX - g.left) / g.kx - g.ox;
+            const ay = (clientY - g.top) / g.ky - g.oy;
+            const ratio = s / v.scale;
+            return this._setView(s, ax - (ax - v.x) * ratio, ay - (ay - v.y) * ratio, g);
+        }
+
+        // Show the image rectangle (x1, y1)-(x2, y2) as large as it fits, `pad` screen pixels
+        // away from the edges of the viewport.
+        _show(x1, y1, x2, y2, pad) {
+            const g = this._geometry();
+            if (!g) return false;
+            const a = this._onStage(g, x1, y1);
+            const b = this._onStage(g, x2, y2);
+            const roomX = Math.max(g.width - (2 * pad) / g.kx, 1);
+            const roomY = Math.max(g.height - (2 * pad) / g.ky, 1);
+            const wanted = Math.min(roomX / Math.abs(b.x - a.x), roomY / Math.abs(b.y - a.y));
+            const s = clamp(Number.isNaN(wanted) ? Infinity : wanted, 1, g.maxScale);
+            const x = g.width / 2 - g.ox - (s * (a.x + b.x)) / 2;
+            const y = g.height / 2 - g.oy - (s * (a.y + b.y)) / 2;
+            this._setView(s, x, y, g);
+            return true;
+        }
+
+        // The part of the image the viewport shows, as the whole pixels that cover it.
+        _viewOf(g) {
+            const p = unmap(g.m, g.left, g.top);
+            const q = unmap(g.m, g.left + g.width * g.kx, g.top + g.height * g.ky);
+            const im = g.image;
+            const within = (v, from, length) => clamp(v, from, from + length);
+            // A crop must hold everything that is visible, so it is rounded outward.
+            const x = within(Math.floor(Math.min(p.x, q.x) + 1e-6), im.x, im.w);
+            const y = within(Math.floor(Math.min(p.y, q.y) + 1e-6), im.y, im.h);
+            const right = within(Math.ceil(Math.max(p.x, q.x) - 1e-6), im.x, im.w);
+            const bottom = within(Math.ceil(Math.max(p.y, q.y) - 1e-6), im.y, im.h);
+            return { x, y, width: right - x, height: bottom - y, scale: g.scale };
+        }
+
+        getView() {
+            const g = this._geometry();
+            return g ? this._viewOf(g) : null;
+        }
+
+        setView(rect) {
+            if (this.dead) return false;
+            const ok =
+                isObject(rect) &&
+                [rect.x, rect.y, rect.width, rect.height].every(isNum) &&
+                rect.width > 0 &&
+                rect.height > 0;
+            if (!ok) {
+                this._problem('setView: needs { x, y, width, height } in image pixels, with a positive size');
+                return false;
+            }
+            return this._show(rect.x, rect.y, rect.x + rect.width, rect.y + rect.height, 0);
+        }
+
+        zoomBy(factor, at) {
+            if (this.dead) return false;
+            if (!(isNum(factor) && factor > 0)) {
+                this._problem('zoomBy: the factor must be a positive number');
+                return false;
+            }
+            if (at !== undefined && at !== null && !(isObject(at) && isNum(at.x) && isNum(at.y))) {
+                this._problem('zoomBy: the point to zoom at must be { x, y } in image pixels');
+                return false;
+            }
+            const g = this._geometry();
+            if (!g) return false;
+            // Around the given point of the image, or else the middle of the viewport.
+            const c = at
+                ? { x: g.m.a * at.x + g.m.c * at.y + g.m.e, y: g.m.b * at.x + g.m.d * at.y + g.m.f }
+                : { x: g.left + (g.width * g.kx) / 2, y: g.top + (g.height * g.ky) / 2 };
+            this._zoomAt(this.view.scale * factor, c.x, c.y, g);
+            return true;
+        }
+
+        fit() {
+            const g = this._geometry();
+            if (!g) return false;
+            this._setView(1, 0, 0, g);
+            return true;
+        }
+
+        toImage(clientX, clientY) {
+            if (this.dead) return null;
+            if (!(isNum(clientX) && isNum(clientY))) {
+                this._problem('toImage: needs clientX and clientY as numbers');
+                return null;
+            }
+            return this._toLocal(clientX, clientY);
+        }
+
+        toClient(x, y) {
+            if (this.dead) return null;
+            if (!(isNum(x) && isNum(y))) {
+                this._problem('toClient: needs x and y as numbers');
+                return null;
+            }
+            const m = this._matrix();
+            return m ? { x: m.a * x + m.c * y + m.e, y: m.b * x + m.d * y + m.f } : { x, y };
         }
 
         // A wheel over the canvas usually means the host is zooming, often with an animation.
@@ -983,11 +1279,11 @@ const MarkinJS = (function () {
             if (!this.wheelFrame) {
                 this.wheelFrame = this._frame(() => {
                     this.wheelFrame = 0;
-                    this.refresh();
+                    this._remeasure();
                 });
             }
             for (const timer of this.wheelTimers) clearTimeout(timer);
-            this.wheelTimers = [this._later(() => this.refresh(), 150), this._later(() => this.refresh(), 400)];
+            this.wheelTimers = [this._later(() => this._remeasure(), 150), this._later(() => this._remeasure(), 400)];
         }
 
         // ---- model
@@ -1531,7 +1827,7 @@ const MarkinJS = (function () {
             this.layer.style.pointerEvents = '';
             if (this.host) this.svg.style.pointerEvents = '';
             this.svg.style.touchAction = 'none';
-            this.refresh();
+            this._remeasure();
         }
 
         // Stop reacting to pointer and keyboard. Pointer events pass through to whatever is below.
@@ -1562,6 +1858,7 @@ const MarkinJS = (function () {
             if (this.opts.historyEnabled) this._trimHistory();
             else this._resetHistory();
             this._renderAll();
+            this._layoutChanged(); // the limits of the view may be other ones now
         }
 
         getOptions() {
@@ -1934,7 +2231,7 @@ const MarkinJS = (function () {
             // Resolve the target first: the calls below may redraw the handles.
             const hit = this._hit(event.target);
             this._flushNudge();
-            this.refresh();
+            this._remeasure();
             if (!this.enabled) return; // a change listener may have run
 
             const gesture = {
@@ -2140,7 +2437,7 @@ const MarkinJS = (function () {
                 if (!last) return;
                 const hit = this._hit(last.target);
                 const part = hit && hit.kind === 'part' ? hit : null;
-                this.refresh();
+                this._remeasure();
                 if (!this._has('hover')) return;
                 this._emit('hover', {
                     position: this._toLocal(last.clientX, last.clientY),
@@ -2234,6 +2531,12 @@ const MarkinJS = (function () {
         'setOptions',
         'getOptions',
         'refresh',
+        'getView',
+        'setView',
+        'zoomBy',
+        'fit',
+        'toImage',
+        'toClient',
         'getSVGElement',
         'getImageElement',
         'getContainerElement',

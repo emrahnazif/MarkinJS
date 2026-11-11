@@ -42,6 +42,23 @@ declare namespace MarkinJS {
         y: number;
     }
 
+    /** A rectangle in image pixels. */
+    interface Rect {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+    }
+
+    /**
+     * The part of the image that is visible, in whole image pixels: rounded outward and kept inside
+     * the image, so it can be used as a crop.
+     */
+    interface View extends Rect {
+        /** Screen pixels per image pixel. */
+        scale: number;
+    }
+
     // ---------------------------------------------------------------- options
 
     /** What else is deleted when a part is deleted with Delete or `deleteSelected()`. */
@@ -96,6 +113,11 @@ declare namespace MarkinJS {
         keypointRadius?: number;
         /** Handle radius in screen pixels. Default `5`. */
         handleRadius?: number;
+        /**
+         * How far the view zooms in, in screen pixels per image pixel. Default `32`. Zoomed out, the view
+         * stops at the image as the page lays it out.
+         */
+        maxScale?: number;
         /** Throw a `TypeError` on invalid input instead of logging it. Default `false`. */
         strict?: boolean;
         /** Log nothing. Default `false`. */
@@ -211,14 +233,27 @@ declare namespace MarkinJS {
         isEnabled(): boolean;
         setOptions(options: Omit<Options, 'annotations'>): void;
         getOptions(): Required<Omit<Options, 'annotations'>>;
-        /** Re-measure the on-screen scale. Only needed after a zoom the editor cannot see. */
+        /** Re-measure the canvas. Only needed after the page scaled or moved it in a way the editor cannot see. */
         refresh(): void;
+
+        /** What is visible now, or `null` while the page is not laid out or the editor has no viewport. */
+        getView(): View | null;
+        /** Show at least this part of the image, as large as it fits, centred. `false` if it could not. */
+        setView(rect: Rect): boolean;
+        /** Zoom in (`factor` above 1) or out, around a point of the image or else the middle of the view. */
+        zoomBy(factor: number, at?: Point | null): boolean;
+        /** Show the whole image. */
+        fit(): boolean;
+        /** A point on screen (`clientX`, `clientY` of an event) as a point of the image. */
+        toImage(clientX: number, clientY: number): Point | null;
+        /** A point of the image as a point on screen, in the coordinates of `clientX` and `clientY`. */
+        toClient(x: number, y: number): Point | null;
 
         getSVGElement(): SVGSVGElement;
         /** The image under the overlay, or `null` when the editor was created on an SVG. */
         getImageElement(): HTMLImageElement | null;
-        /** The wrapper created around the image, or `null` when the editor was created on an SVG. */
-        getContainerElement(): HTMLDivElement | null;
+        /** The viewport: the element that clips the zoomed picture. `null` when the editor has none. */
+        getContainerElement(): HTMLElement | null;
         /** Remove everything the editor added to the page. Every method is a no-op afterwards. */
         destroy(): void;
     }
