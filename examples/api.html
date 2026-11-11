@@ -216,8 +216,8 @@ MarkinJS.denormalize(annotations, width, height);  // fractions -&gt; pixels</co
                             </p>
                             <ul>
                                 <li><strong>An image:</strong> MarkinJS wraps it in a viewport and a stage (two <code>&lt;div&gt;</code>s) and lays an SVG over the picture as the browser draws it (borders, padding, <code>object-fit</code> and <code>object-position</code> are accounted for). The coordinate system is the image's natural size. <code>destroy()</code> puts the page back.</li>
-                                <li><strong>An SVG:</strong> MarkinJS draws into its own <code>&lt;g class="markin-layer"&gt;</code>. The <code>viewBox</code> is the coordinate system and the area annotations stay inside. The SVG is wrapped in a viewport and a stage too, unless it is positioned over other content.</li>
-                                <li><strong>Markup you own</strong> (a framework, or an SVG laid over a picture): mark the element that holds the picture and the SVG with <code>data-markin-stage</code>. MarkinJS zooms that element inside its parent and changes nothing else.</li>
+                                <li><strong>An SVG:</strong> MarkinJS draws into its own <code>&lt;g class="markin-layer"&gt;</code>. The <code>viewBox</code> is the coordinate system and the area annotations stay inside. The SVG stays where it is: zooming changes its <code>viewBox</code> to the visible part of the image and nothing else.</li>
+                                <li><strong>Markup you own</strong> (a framework, or an SVG laid over a picture): mark the element that holds the picture and the SVG with <code>data-markin-stage</code>. Its parent is the viewport: MarkinJS zooms the picture inside it and changes nothing else.</li>
                             </ul>
                             <p>Calling <code>create()</code> again on the same element replaces the earlier editor.</p>
                         </section>
@@ -272,7 +272,7 @@ MarkinJS.denormalize(annotations, width, height);  // fractions -&gt; pixels</co
                                         <tr><td><code>enable()</code> / <code>disable()</code> / <code>isEnabled()</code></td><td>A disabled editor edits nothing: pointer events pass through the annotations to whatever is underneath. Its view can still be zoomed and moved, and it still emits <code>hover</code> and <code>canvasclick</code>.</td></tr>
                                         <tr><td><code>setOptions(options)</code> / <code>getOptions()</code></td><td>Change options at run time.</td></tr>
                                         <tr><td><code>refresh()</code></td><td>Re-measure the canvas now. Only needed right after your own code scaled or moved it with a CSS transform; otherwise the editor re-measures by itself.</td></tr>
-                                        <tr><td><code>getSVGElement()</code> / <code>getImageElement()</code> / <code>getContainerElement()</code></td><td>The SVG, the image under it (or <code>null</code>), and the viewport that clips the zoomed picture (or <code>null</code>).</td></tr>
+                                        <tr><td><code>getSVGElement()</code> / <code>getImageElement()</code> / <code>getContainerElement()</code></td><td>The SVG, the image under it (or <code>null</code>), and the viewport: the element that clips the zoomed picture (or <code>null</code>; an SVG that holds the whole picture clips itself).</td></tr>
                                         <tr><td><code>destroy()</code></td><td>Remove everything the editor added and put the page back.</td></tr>
                                     </tbody>
                                 </table>
@@ -452,11 +452,12 @@ editor.on('viewsettle', async (view) =&gt; {
 
                             <h3 class="title is-4">What happens on your page</h3>
                             <ul>
+                                <li>The SVG is never scaled. Zoomed in, its <code>viewBox</code> is the part of the image that is visible (with <code>preserveAspectRatio="none"</code>), so outlines and handles are drawn at the size they have on screen and stay sharp at every zoom, in every browser. Only the <code>&lt;img&gt;</code> under it is moved and scaled with a CSS transform. Ask <code>getView()</code> what is visible, not the attribute.</li>
                                 <li>The box the image has on your page is the window. Zoomed in, the picture is clipped to it. At rest nothing is clipped and nothing is transformed.</li>
                                 <li>An image that its own box crops (<code>object-fit: cover</code>) stays cropped: the view never shows more than your page shows at rest.</li>
                                 <li>On a touch screen, one finger moves annotations and the view. Pinch is not handled yet: give touch users buttons that call <code>zoomBy()</code>.</li>
                             </ul>
-                            <pre class="code-highlight"><code>&lt;!-- Markup you own: the marked element is zoomed, its parent is the window --&gt;
+                            <pre class="code-highlight"><code>&lt;!-- Markup you own: the marked element holds the picture and the SVG, its parent is the window --&gt;
 &lt;div class="window"&gt;
     &lt;div data-markin-stage style="position: relative; display: inline-block; line-height: 0"&gt;
         &lt;img src="photo.jpg" alt=""&gt;

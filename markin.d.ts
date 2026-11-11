@@ -292,7 +292,10 @@ declare namespace MarkinJS {
         getSVGElement(): SVGSVGElement;
         /** The image under the overlay, or `null` when the editor was created on an SVG. */
         getImageElement(): HTMLImageElement | null;
-        /** The viewport: the element that clips the zoomed picture. `null` when the editor has none. */
+        /**
+         * The viewport: the element that clips the zoomed picture. `null` when the editor has none, and
+         * for an `<svg>` that holds the whole picture, which clips itself.
+         */
         getContainerElement(): HTMLElement | null;
         /** Remove everything the editor added to the page. Every method is a no-op afterwards. */
         destroy(): void;

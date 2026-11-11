@@ -160,7 +160,7 @@ logged. Pass `strict: true` to get a `TypeError` instead.
 | `enable()` / `disable()` | A disabled editor edits nothing: pointer events pass through the annotations to whatever is underneath. Its view can still be zoomed and moved. |
 | `setOptions(options)` / `getOptions()` | Change options at run time. |
 | `refresh()` | Re-measure the canvas now. Only needed right after your own code scaled or moved it with a CSS transform; otherwise the editor re-measures by itself. |
-| `getSVGElement()` / `getImageElement()` / `getContainerElement()` | The SVG, the image under it (or `null`), and the viewport that clips the zoomed picture (or `null`). |
+| `getSVGElement()` / `getImageElement()` / `getContainerElement()` | The SVG, the image under it (or `null`), and the viewport: the element that clips the zoomed picture (or `null`; an `<svg>` that holds the whole picture clips itself). |
 | `destroy()` | Remove everything the editor added and put the page back. |
 
 ### View
@@ -330,8 +330,17 @@ letters are often shortcuts of the app around the editor.
 
 ### What happens on your page
 
-- Given an `<img>` or an `<svg>`, MarkinJS wraps it in a viewport (`<div class="markin-container">`) and, inside
-  that, a stage (`<div class="markin-stage">`). Zooming is one CSS transform on the stage. `destroy()` unwraps.
+- Given an `<img>`, MarkinJS wraps it in a viewport (`<div class="markin-container">`) and, inside that, a stage
+  (`<div class="markin-stage">`) that holds the image and an `<svg>` laid over it. `destroy()` unwraps. An `<svg>`
+  of your own stays where it is.
+- The `<svg>` is never scaled. Zoomed in, its `viewBox` is the part of the image that is visible, so outlines and
+  handles are drawn at the size they have on screen and stay sharp at every zoom, in every browser (a layer that
+  is scaled with CSS is one that Safari and other WebKit views may enlarge as a bitmap). Only the `<img>` under
+  it is moved and scaled with a CSS transform.
+- While the view is zoomed in, the `<svg>` therefore has another `viewBox` and `preserveAspectRatio="none"`, and
+  over an image it covers the whole viewport. Ask `getView()` what is visible, not the attribute. Whatever you
+  drew inside an `<svg>` of your own zooms with it. If you set a new `viewBox` on it, that is taken as a new
+  picture, which starts at rest.
 - The box the image has on your page is the window. Zoomed in, the picture is clipped to it. At rest nothing is
   clipped and nothing is transformed: the page is exactly as you laid it out.
 - An image that its own box crops (`object-fit: cover`) stays cropped: the view never shows more than your page
@@ -349,8 +358,8 @@ For CSS there are stable hooks:
 
 ## Frameworks (React, Vue, …)
 
-MarkinJS wraps the `<img>` or `<svg>` it is given in two `<div>`s, and `destroy()` unwraps it. If your framework
-owns the markup, render that structure yourself, mark the stage, and pass the SVG:
+MarkinJS wraps an `<img>` it is given in two `<div>`s, and `destroy()` unwraps it. If your framework owns the
+markup, render that structure yourself, mark the stage, and pass the SVG:
 
 ```html
 <div class="window">                                    <!-- the viewport: the size you want to see -->
@@ -367,10 +376,16 @@ const editor = MarkinJS.create(svgElement, { annotations });
 editor.destroy();
 ```
 
-The element marked `data-markin-stage` is what gets zoomed, and its parent is the viewport. MarkinJS changes
-nothing else in your markup: it sets a transform on the stage and `overflow: hidden` on the viewport while the
-view is zoomed in, and puts both back. The picture may be smaller than the viewport; it then stays where your
-layout put it and grows from there.
+The element marked `data-markin-stage` holds the picture and the `<svg>`, and its parent is the viewport. While
+the view is zoomed in, MarkinJS sets a transform on the picture (every child of the stage but the `<svg>`), lays
+the `<svg>` over the viewport with inline `left`, `top`, `width` and `height`, changes its `viewBox` and
+`preserveAspectRatio`, and sets `overflow: hidden` on the viewport. At rest and after `destroy()` all of that is
+as you rendered it, and nothing else in your markup is touched. Keep those attributes and styles out of state
+that is written again while the editor lives. The picture may be smaller than the viewport; it then stays where
+your layout put it and grows from there.
+
+An `<svg>` that holds the whole picture itself (an `<image>`, or only shapes) needs none of this: it is its own
+viewport, and zooming changes its `viewBox` and nothing else.
 
 An `<svg>` that is positioned over other content and has no marked stage is left exactly where it is. It edits as
 usual but cannot zoom, and a warning says so (not with `zoomControls: false`).
@@ -383,9 +398,10 @@ Calling `create()` again on the same element replaces the earlier editor.
 The data format, the methods and the events of 0.2 are unchanged. What 0.3 adds can still change how a page behaves:
 
 - **Zoom and pan are on.** `zoomControls: false` leaves the wheel, the pinch and the keys alone, as before.
-- **An `<svg>` passed to `create()` is wrapped** in a viewport and a stage, like an `<img>` always was, unless it
-  is positioned over other content or you marked a stage (see above). `getContainerElement()` returns the
-  viewport for it, where it returned `null`.
+- **The `viewBox` of the `<svg>` changes while the view is zoomed in.** It is the visible part of the image then,
+  with `preserveAspectRatio="none"`, and it is the image again at rest and after `destroy()`. An `<svg>` passed to
+  `create()` is not wrapped or moved, and `getContainerElement()` returns `null` for it as before, unless you
+  marked a stage (see above); then it returns the stage's parent.
 - **`disable()` stops editing, not everything.** The view can still be zoomed and moved, and `hover` and
   `canvasclick` are still emitted. Combine it with `zoomControls: false` for an editor that only shows.
 - **`canvasclick` is not emitted for a drag of the view**, and the browser's `click` after such a drag is swallowed.
