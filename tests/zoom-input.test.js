@@ -5,6 +5,7 @@ import {
     makeImage,
     track,
     setBox,
+    windowOf,
     screenOf,
     wheel,
     gesture,
@@ -296,8 +297,6 @@ describe('dragging the view', () => {
         }
         return made;
     }
-    // The window onto the image: the viewport around an image, or else the <svg> itself.
-    const viewport = (editor) => editor.getContainerElement() || editor.getSVGElement();
     // Hold Space with the pointer over the editor.
     const holdSpace = (svg) => {
         pointer('pointermove', svg, 100, 100, { buttons: 0 });
@@ -371,7 +370,7 @@ describe('dragging the view', () => {
             release(60, 80);
             expect(event.defaultPrevented).toBe(false);
             expect(editor.getView()).toEqual(WHOLE);
-            expect(viewport(editor).style.cursor).toBe('');
+            expect(windowOf(editor).style.cursor).toBe('');
         });
 
         it('can be switched off with panOnEmpty: false', () => {
@@ -409,13 +408,13 @@ describe('dragging the view', () => {
             editor.select('box');
             heard.length = 0;
             expect(holdSpace(svg).defaultPrevented).toBe(true);
-            expect(viewport(editor).style.cursor).toBe('grab');
+            expect(windowOf(editor).style.cursor).toBe('grab');
 
             const [x, y] = screenOf(svg, 800, 600);
             const down = press(handleEl(svg, 'se'), x, y);
             expect(down.defaultPrevented).toBe(true);
             move(x - 40, y - 20);
-            expect(viewport(editor).style.cursor).toBe('grabbing');
+            expect(windowOf(editor).style.cursor).toBe('grabbing');
             release(x - 40, y - 20);
             expect(editor.getView()).toEqual({ x: 620, y: 460, width: 400, height: 300, scale: 2 });
             expect(editor.getAnnotation('box')).toEqual(THING);
@@ -423,7 +422,7 @@ describe('dragging the view', () => {
             expect(heard).toEqual([]);
 
             keyUp(' ');
-            expect(viewport(editor).style.cursor).toBe('');
+            expect(windowOf(editor).style.cursor).toBe('');
             // And the annotation takes the pointer again.
             press(bboxEl(svg, 'box'), x, y);
             move(x + 40, y);
@@ -447,9 +446,9 @@ describe('dragging the view', () => {
             // The pointer has not been over it yet.
             expect(key(' ', { code: 'Space' }).defaultPrevented).toBe(false);
             pointer('pointermove', svg, 100, 100, { buttons: 0 });
-            pointer('pointerleave', viewport(editor), 900, 900, { buttons: 0 });
+            pointer('pointerleave', windowOf(editor), 900, 900, { buttons: 0 });
             expect(key(' ', { code: 'Space' }).defaultPrevented).toBe(false);
-            expect(viewport(editor).style.cursor).toBe('');
+            expect(windowOf(editor).style.cursor).toBe('');
         });
 
         it('is left alone while the user types', () => {
@@ -464,7 +463,7 @@ describe('dragging the view', () => {
             it(`is left alone with ${Object.keys(off)[0]}: false`, () => {
                 const { editor, svg } = zoomed(off);
                 expect(holdSpace(svg).defaultPrevented).toBe(false);
-                expect(viewport(editor).style.cursor).toBe('');
+                expect(windowOf(editor).style.cursor).toBe('');
             });
         }
 
@@ -472,7 +471,7 @@ describe('dragging the view', () => {
             const { editor, svg } = zoomed();
             holdSpace(svg);
             window.dispatchEvent(new Event('blur'));
-            expect(viewport(editor).style.cursor).toBe('');
+            expect(windowOf(editor).style.cursor).toBe('');
             const [x, y] = screenOf(svg, 800, 600);
             press(bboxEl(svg, 'box'), x, y);
             release(x, y);

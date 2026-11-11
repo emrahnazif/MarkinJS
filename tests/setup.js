@@ -184,6 +184,8 @@ export function makeStage({ viewBox = '0 0 800 600', viewport, picture, extra = 
 
 // The stage inside the viewport of an editor: what holds the picture and the <svg> over it.
 export const stageOf = (editor) => editor.getContainerElement().firstChild;
+// The window onto the image: the viewport around a picture, or else the <svg> itself.
+export const windowOf = (editor) => editor.getContainerElement() || editor.getSVGElement();
 
 // Give an element its box on screen, before any zoom.
 export function setBox(el, { left = 0, top = 0, width, height }) {

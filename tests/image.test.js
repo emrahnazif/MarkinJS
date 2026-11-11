@@ -374,9 +374,7 @@ describe('an editor on an <svg>', () => {
     });
 
     it('a second create on the same <svg> starts from the viewBox the page gave it', () => {
-        const { svg } = page('<svg viewBox="0 0 800 600"></svg>');
-        setBox(svg, { left: 0, top: 0, width: 800, height: 600 });
-        const first = makeEditor({}, svg).editor;
+        const { editor: first, svg } = makeEditor();
         first.zoomBy(4);
         expect(svg.getAttribute('viewBox')).toBe('300 225 200 150');
         const second = makeEditor({}, svg).editor;

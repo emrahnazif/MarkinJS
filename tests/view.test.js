@@ -7,6 +7,7 @@ import {
     track,
     setBox,
     stageOf,
+    windowOf,
     screenOf,
     pointer,
     press,
@@ -31,14 +32,13 @@ import {
 } from './setup.js';
 
 // What the library wrote on the page for the current view: the part of the image the <svg> draws,
-// and whether the window onto it clips. The window is the viewport, or else the <svg> itself.
-const written = (editor) => {
-    const svg = editor.getSVGElement();
-    return {
-        viewBox: svg.getAttribute('viewBox'),
-        clips: (editor.getContainerElement() || svg).style.overflow === 'hidden'
-    };
-};
+// and whether the window onto it clips.
+const written = (editor) => ({
+    viewBox: editor.getSVGElement().getAttribute('viewBox'),
+    clips: windowOf(editor).style.overflow === 'hidden'
+});
+// Numbers that agree but for the last digits a computation leaves.
+const near = (actual, expected) => actual.forEach((n, i) => expect(n).toBeCloseTo(expected[i], 6));
 const AT_REST = { viewBox: '0 0 1600 1200', clips: false };
 
 describe('the view at rest', () => {
@@ -222,7 +222,7 @@ describe('zoomTo', () => {
         expect(editor.getView().scale).toBe(18);
         const middle = editor.toClient(800, 600);
         const corner = editor.toClient(780, 590);
-        [middle.x, middle.y, corner.x, corner.y].forEach((n, i) => expect(n).toBeCloseTo([420, 320, 60, 140][i], 6));
+        near([middle.x, middle.y, corner.x, corner.y], [420, 320, 60, 140]);
     });
 
     it('takes the padding it is given', () => {
@@ -545,13 +545,14 @@ describe('viewchange and viewsettle', () => {
 });
 
 describe('a stage the page marked', () => {
-    // A 1000 x 600 viewport with an 800 x 600 picture centred in it.
-    const centred = (prepare) =>
+    // A 1000 x 600 viewport with an 800 x 600 picture in it, `left` pixels from its left edge.
+    const standing = (left, prepare) =>
         makeStage({
             viewport: { left: 0, top: 0, width: 1000, height: 600 },
-            picture: { left: 100, top: 0, width: 800, height: 600 },
+            picture: { left, top: 0, width: 800, height: 600 },
             prepare
         });
+    const centred = (prepare) => standing(100, prepare);
 
     it('grows a picture that is smaller than the viewport from where it stands', () => {
         const { editor, stage, image, svg, viewport } = centred();
@@ -589,18 +590,13 @@ describe('a stage the page marked', () => {
     });
 
     it('keeps a picture that still fits against the side the page put it on', () => {
-        const aligned = (left) =>
-            makeStage({
-                viewport: { left: 0, top: 0, width: 1000, height: 600 },
-                picture: { left, top: 0, width: 800, height: 600 }
-            });
         // 880 wide in a viewport of 1000: on the left it stays on the left, on the right on the right.
-        const atLeft = aligned(0);
+        const atLeft = standing(0);
         atLeft.editor.zoomBy(1.1);
         expect(atLeft.image.style.transform).toBe('translate(0px, -30px) scale(1.1)');
         expect(atLeft.editor.toClient(0, 300).x).toBeCloseTo(0, 6);
 
-        const atRight = aligned(200);
+        const atRight = standing(200);
         atRight.editor.zoomBy(1.1);
         expect(atRight.image.style.transform).toBe('translate(-80px, -30px) scale(1.1)');
         expect(atRight.editor.toClient(800, 300).x).toBeCloseTo(1000, 6);
@@ -630,9 +626,15 @@ describe('a stage the page marked', () => {
             viewport: { left: 0, top: 0, width: 820, height: 620 },
             picture: { left: 10, top: 10, width: 800, height: 600 },
             prepare(viewport) {
-                const sizes = { clientLeft: 10, clientTop: 10, clientWidth: 800, clientHeight: 600 };
-                const all = { ...sizes, offsetWidth: 820, offsetHeight: 620 };
-                for (const [name, value] of Object.entries(all)) Object.defineProperty(viewport, name, { value });
+                const sizes = {
+                    clientLeft: 10,
+                    clientTop: 10,
+                    clientWidth: 800,
+                    clientHeight: 600,
+                    offsetWidth: 820,
+                    offsetHeight: 620
+                };
+                for (const [name, value] of Object.entries(sizes)) Object.defineProperty(viewport, name, { value });
             }
         });
         editor.zoomBy(2);
@@ -644,8 +646,7 @@ describe('a stage the page marked', () => {
             '600px'
         ]);
         const middle = editor.toClient(400, 300);
-        expect(middle.x).toBeCloseTo(410, 6);
-        expect(middle.y).toBeCloseTo(310, 6);
+        near([middle.x, middle.y], [410, 310]);
     });
 
     it('gives the page its own styles and attributes back', () => {
@@ -796,7 +797,6 @@ describe('editing while zoomed in', () => {
         },
         { id: 'dot', keypoints: [{ name: 'tip', point: [770, 620] }] }
     ];
-    const near = (actual, expected) => actual.forEach((n, i) => expect(n).toBeCloseTo(expected[i], 6));
 
     for (const zoom of [1, 4, 16]) {
         describe(`at ${zoom}x`, () => {
