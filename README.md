@@ -48,10 +48,10 @@ const MarkinJS = require('markinjs'); // CommonJS
 
 ```html
 <!-- From a CDN, pinned to a version -->
-<script src="https://unpkg.com/markinjs@0.3.1/dist/markin.min.js"></script>
+<script src="https://unpkg.com/markinjs@0.3.2/dist/markin.min.js"></script>
 
 <!-- Or a copy in your app. Keep the version in the file name, so an update is always a visible change. -->
-<script src="/static/js/markin-0.3.1.min.js"></script>
+<script src="/static/js/markin-0.3.2.min.js"></script>
 ```
 
 The build writes `dist/markin-<version>.min.js` for exactly this purpose. The source file `markin.js` also
