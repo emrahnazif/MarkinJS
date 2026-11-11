@@ -29,6 +29,8 @@ const MarkinJS = (function () {
     const DRAG_THRESHOLD = 3; // screen px a press must travel before it becomes a drag
     const HANDLE_SLOP = 6; // extra screen px of grab area around a handle
     const NUDGE_COMMIT_MS = 800; // idle time after which a run of arrow-key nudges becomes one undo step
+    const WHEEL_RUN_MS = 200; // wheel events closer together than this are one movement of the wheel or the fingers
+    const WHEEL_LINE = 33; // pixels in one "line" of a wheel that reports lines: three lines are one notch
 
     // Every option: [default, kind]. A kind ending in "?" also accepts null.
     const OPTIONS = {
@@ -52,6 +54,8 @@ const MarkinJS = (function () {
         handleRadius: [5, 'positive'],
         maxScale: [32, 'positive'],
         settleDelay: [250, 'delay'],
+        zoomControls: [true, 'boolean'],
+        wheel: ['pan', 'wheel'],
         strict: [false, 'boolean'],
         silent: [false, 'boolean'],
         logger: [null, 'function?']
@@ -456,6 +460,8 @@ const MarkinJS = (function () {
                 return isNum(value) && value > 0 ? null : 'must be a positive number';
             case 'delay':
                 return isNum(value) && value >= 0 ? null : 'must be a number of milliseconds, 0 or more';
+            case 'wheel':
+                return value === 'pan' || value === 'zoom' ? null : 'must be "pan" or "zoom"';
             case 'function':
                 return typeof value === 'function' ? null : 'must be a function';
             case 'array':
@@ -742,7 +748,8 @@ const MarkinJS = (function () {
                 target.localName === 'img' ? mountOverImage(target, (fresh) => this._layoutChanged(fresh), warn) : null;
             this.svg = this.host ? this.host.svg : target;
             // What zoom and pan work on. An <svg> that could not be given a viewport has no view.
-            this.frame = this.host || mountAroundSvg(target, warn);
+            // An <svg> that cannot be given them works as before; only a host that wants zoom is told.
+            this.frame = this.host || mountAroundSvg(target, (message) => this.opts.zoomControls && warn(message));
             this.viewport = this.frame ? this.frame.container : null;
             this.stage = this.frame ? this.frame.stage : null;
             // The SVG may live in another document than this script (an iframe, a popup).
@@ -767,8 +774,7 @@ const MarkinJS = (function () {
             this.nudgeTimer = 0;
             this.hoverFrame = 0;
             this.hoverEvent = null;
-            this.wheelFrame = 0;
-            this.wheelTimers = [];
+            this.wheelRun = null; // the wheel movement in progress: when it was last heard, and whether it is ours
             this.warnedBounds = false;
 
             this._build();
@@ -803,12 +809,14 @@ const MarkinJS = (function () {
             this.cleanup = [
                 on(svg, 'pointerdown', '_onPointerDown'),
                 on(svg, 'pointermove', '_onHover'),
-                on(svg, 'wheel', '_onWheel', { passive: true }),
                 on(svg, 'touchstart', '_onTouchStart', { passive: true }),
                 weakListen(this.doc, 'keydown', this, '_onKeyDown'),
                 weakListen(this.doc, 'keyup', this, '_onKeyUp'),
                 weakListen(this.win, 'resize', this, '_onResize')
             ];
+            // Zoom and pan are listened for on the viewport, which is there whatever the picture is
+            // moved to, and also hears what happens over the image while the editor is disabled.
+            if (this.viewport) this.cleanup.push(on(this.viewport, 'wheel', '_onWheel', { passive: false }));
             // Over an image, the overlay is resized by the image's own observer, which also refreshes
             // the editor. A second observer here would only chase the first one.
             const Observer = this.win.ResizeObserver;
@@ -1356,16 +1364,49 @@ const MarkinJS = (function () {
             return m ? { x: m.a * x + m.c * y + m.e, y: m.b * x + m.d * y + m.f } : { x, y };
         }
 
-        // A wheel over the canvas usually means the host is zooming, often with an animation.
-        _onWheel() {
-            if (!this.wheelFrame) {
-                this.wheelFrame = this._frame(() => {
-                    this.wheelFrame = 0;
-                    this._remeasure();
-                });
+        // ---- zoom and pan by hand
+
+        // True when the user may move the view.
+        _pans() {
+            return !this.dead && !!this.viewport && this.opts.zoomControls;
+        }
+
+        // A wheel or a trackpad. Pinching a trackpad also arrives here, as a wheel with Ctrl held
+        // (Chrome, Firefox, Edge); WebKit sends gesture events instead.
+        _onWheel(event) {
+            if (!this._pans()) return;
+            const g = this._geometry();
+            if (!g) return;
+            const pinch = event.ctrlKey || event.metaKey;
+            const zooms = pinch || this.opts.wheel === 'zoom';
+            // One movement of the wheel or the fingers is many events, and whose it is gets decided
+            // by the first. A scroll that cannot move the view belongs to the page, all of it; one
+            // that can stays ours when it reaches the edge, and never spills over into the page.
+            // A pinch is always ours: left alone, the browser would zoom the whole page.
+            const now = Date.now();
+            let run = this.wheelRun;
+            const first = !run || now - run.at > WHEEL_RUN_MS || run.zooms !== zooms;
+            if (first) run = this.wheelRun = { zooms, ours: pinch };
+            run.at = now;
+            if (!first && !run.ours) return;
+
+            const lines = event.deltaMode === 1 ? WHEEL_LINE : event.deltaMode === 2 ? g.height * g.ky : 1;
+            let dx = (event.deltaX || 0) * lines;
+            let dy = (event.deltaY || 0) * lines;
+            const v = this.view;
+            let moved;
+            if (zooms) {
+                // A notch of a mouse wheel is about 100 and zooms by 15%. A pinch reports small
+                // numbers, which Ctrl marks; a real Ctrl + wheel is kept from leaping.
+                const power = clamp(-dy * 0.002 * (event.ctrlKey ? 10 : 1), -0.35, 0.35);
+                moved = this._zoomAt(v.scale * Math.pow(2, power), event.clientX, event.clientY, g);
+            } else {
+                // Shift turns a wheel that only goes up and down sideways.
+                if (event.shiftKey && dx === 0) [dx, dy] = [dy, 0];
+                moved = this._setView(v.scale, v.x - dx / g.kx, v.y - dy / g.ky, g);
             }
-            for (const timer of this.wheelTimers) clearTimeout(timer);
-            this.wheelTimers = [this._later(() => this._remeasure(), 150), this._later(() => this._remeasure(), 400)];
+            if (first && moved) run.ours = true;
+            if (run.ours) event.preventDefault();
         }
 
         // ---- model

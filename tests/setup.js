@@ -180,6 +180,24 @@ export function drag(target, from, to, init) {
     release(to[0], to[1], init);
 }
 
+// ---- wheel
+
+export function wheel(target, x, y, init = {}) {
+    const event = new WheelEvent('wheel', {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        clientX: x,
+        clientY: y,
+        deltaX: 0,
+        deltaY: 0,
+        deltaMode: 0,
+        ...init
+    });
+    target.dispatchEvent(event);
+    return event;
+}
+
 // ---- keyboard
 
 export function key(name, init = {}, target = document.body) {

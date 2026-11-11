@@ -120,6 +120,16 @@ declare namespace MarkinJS {
         maxScale?: number;
         /** Milliseconds the view has to stay still before `viewsettle` fires. Default `250`. */
         settleDelay?: number;
+        /**
+         * Let the user zoom and pan: wheel, pinch, drags and keys. Default `true`. With `false` the view
+         * only moves when the methods are called.
+         */
+        zoomControls?: boolean;
+        /**
+         * What a plain wheel or two-finger scroll does: `'pan'` (default) moves the view, `'zoom'` zooms
+         * towards the pointer. Ctrl / Cmd + wheel and a trackpad pinch always zoom.
+         */
+        wheel?: 'pan' | 'zoom';
         /** Throw a `TypeError` on invalid input instead of logging it. Default `false`. */
         strict?: boolean;
         /** Log nothing. Default `false`. */
