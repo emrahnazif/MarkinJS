@@ -85,7 +85,7 @@
             <h1 class="title">MarkinJS Interactive Example</h1>
             <h2 class="subtitle">
                 Click an annotation to select it, then drag it, its corners, its vertices or its keypoints.
-                Works with mouse, touch and pen.
+                Pinch or hold Ctrl / Cmd and scroll to zoom, then drag the empty canvas to move around.
             </h2>
         </div>
     </section>
@@ -97,7 +97,10 @@
                     <div class="stage" id="stage">
                         <img id="demo-image" src="assets/images/image.jpg" alt="Harbour with boats, a tyre and chairs">
                     </div>
-                    <p class="help">Coordinates are in image pixels (1280 × 853), whatever size the image is shown at.</p>
+                    <p class="help">
+                        Coordinates are in image pixels (1280 × 853), whatever size the image is shown at.
+                        <span id="view-info"></span>
+                    </p>
                 </div>
 
                 <div class="column is-4">
@@ -123,6 +126,15 @@
                         </div>
                         <p class="help" id="selection-info">Nothing selected.</p>
 
+                        <h4 class="title is-6">View</h4>
+                        <div class="buttons">
+                            <button id="zoom-out" class="button is-light is-small" aria-label="Zoom out">−</button>
+                            <button id="zoom-in" class="button is-light is-small" aria-label="Zoom in">+</button>
+                            <button id="fit" class="button is-light is-small">Whole image</button>
+                            <button id="previous" class="button is-light is-small">Previous</button>
+                            <button id="next" class="button is-light is-small">Next</button>
+                        </div>
+
                         <h4 class="title is-6">Edit</h4>
                         <div class="buttons">
                             <button id="undo" class="button is-info is-small" disabled>Undo</button>
@@ -139,6 +151,8 @@
                             <label class="checkbox is-size-7"><input type="checkbox" data-option="constrainToImage" checked> Keep everything inside the image</label><br>
                             <label class="checkbox is-size-7"><input type="checkbox" data-option="requireSelectionToDrag" checked> Select before dragging</label><br>
                             <label class="checkbox is-size-7"><input type="checkbox" data-option="keyboardControls" checked> Keyboard shortcuts</label><br>
+                            <label class="checkbox is-size-7"><input type="checkbox" data-option="zoomControls" checked> Zoom and pan by hand</label><br>
+                            <label class="checkbox is-size-7"><input type="checkbox" id="wheel-zoom"> A plain wheel zooms instead of moving the view</label><br>
                             <label class="checkbox is-size-7"><input type="checkbox" id="enabled" checked> Editor enabled</label>
                         </div>
                     </div>
@@ -218,8 +232,34 @@ editor.undo();</pre>
                                 <li><strong>Delete</strong> or <strong>Backspace</strong>: delete the selection</li>
                                 <li><strong>Ctrl / Cmd + Z</strong>: undo. <strong>Ctrl / Cmd + Shift + Z</strong> or <strong>Ctrl + Y</strong>: redo</li>
                                 <li><strong>Escape</strong>: cancel a drag, or deselect</li>
+                                <li><strong>+</strong> and <strong>-</strong>: zoom. <strong>Shift + 1</strong>: the whole image. <strong>Shift + 0</strong>: real pixels</li>
+                                <li><strong>Space</strong>, held: a drag moves the view from anywhere</li>
                             </ul>
                             <p class="is-size-7">Keys typed into a text field are never taken by the editor.</p>
+                        </div>
+                    </div>
+                    <div class="column is-6">
+                        <div class="box">
+                            <h3 class="title is-5">Zoom and pan</h3>
+                            <ul>
+                                <li><strong>Pinch</strong>, or <strong>Ctrl / Cmd + wheel</strong>: zoom towards the pointer</li>
+                                <li><strong>Wheel</strong> or two-finger scroll: move the view</li>
+                                <li><strong>Drag the empty canvas</strong>: move the view, once it is zoomed in</li>
+                                <li><strong>Space + drag</strong> or the <strong>middle button</strong>: move it from anywhere</li>
+                            </ul>
+                            <p class="is-size-7">While the whole image is in view, the wheel scrolls the page as usual.</p>
+                        </div>
+                    </div>
+                    <div class="column is-6">
+                        <div class="box">
+                            <h3 class="title is-5">Use what is visible</h3>
+                            <pre>editor.zoomTo(id);            // frame one annotation
+editor.step(1);               // select and frame the next one
+
+// The visible part, in whole image pixels: a crop.
+editor.on('viewsettle', (view) =&gt; {
+    analyse(view.x, view.y, view.width, view.height);
+});</pre>
                         </div>
                     </div>
                 </div>
@@ -345,6 +385,13 @@ editor.undo();</pre>
         editor.on('canvasclick', (e) => {
             log(`canvasclick at ${Math.round(e.position.x)}, ${Math.round(e.position.y)}`);
         });
+        // The view while it moves, and once more when it has come to rest.
+        editor.on('viewchange', (view) => {
+            $('view-info').textContent = `Showing ${view.width} × ${view.height} from ${view.x}, ${view.y}, at ${Math.round(view.scale * 100)}%.`;
+        });
+        editor.on('viewsettle', (view) => {
+            log(`viewsettle: ${view.width} × ${view.height} at ${view.x}, ${view.y}`);
+        });
 
         // ---- controls
 
@@ -401,6 +448,15 @@ editor.undo();</pre>
         classSelect.addEventListener('change', () => {
             const selection = editor.getSelection();
             if (selection) editor.updateAnnotation(selection.id, { class_id: Number(classSelect.value) });
+        });
+
+        $('zoom-in').addEventListener('click', () => editor.zoomBy(1.5));
+        $('zoom-out').addEventListener('click', () => editor.zoomBy(1 / 1.5));
+        $('fit').addEventListener('click', () => editor.fit());
+        $('next').addEventListener('click', () => editor.step(1) || log('step: that was the last one'));
+        $('previous').addEventListener('click', () => editor.step(-1) || log('step: that was the first one'));
+        $('wheel-zoom').addEventListener('change', (event) => {
+            editor.setOptions({ wheel: event.target.checked ? 'zoom' : 'pan' });
         });
 
         $('delete-selected').addEventListener('click', () => editor.deleteSelected());
