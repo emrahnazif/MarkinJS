@@ -386,7 +386,7 @@ describe('options', () => {
     it('reports unknown, removed and wrongly typed options and keeps the defaults', () => {
         const { editor, log } = makeEditor({ zoom: 2, autoResizeBbox: true, colour: 'red', strokeWidth: -1 });
         expect(log).toEqual([
-            'error: option "zoom" was removed: sizes now follow the on-screen scale automatically',
+            'error: option "zoom" was removed: zoom is built in (see zoomBy and setView), and sizes follow the on-screen scale',
             'error: option "autoResizeBbox" was removed: it never had an effect',
             'error: unknown option "colour"',
             'error: option "strokeWidth" must be a positive number'

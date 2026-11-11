@@ -685,12 +685,13 @@ describe('stepping through the annotations', () => {
     it('step() goes through the list in its own order and stops at the ends', () => {
         const { editor } = start();
         const seen = [];
-        while (editor.step(1)) seen.push(selected(editor));
+        // Bounded, so that a step() that never says "no further" fails the test instead of hanging it.
+        for (let i = 0; i < 10 && editor.step(1); i++) seen.push(selected(editor));
         expect(seen).toEqual(['c', 'a', 'b']);
         expect(selected(editor)).toBe('b');
         expect(editor.step(1)).toBe(false);
 
-        while (editor.step(-1)) seen.push(selected(editor));
+        for (let i = 0; i < 10 && editor.step(-1); i++) seen.push(selected(editor));
         expect(seen).toEqual(['c', 'a', 'b', 'a', 'c']);
         expect(editor.step(-1)).toBe(false);
         expect(selected(editor)).toBe('c');

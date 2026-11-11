@@ -347,6 +347,23 @@ describe('the view and the page', () => {
         }
     });
 
+    it('has no view of an image that has not arrived yet', () => {
+        const image = document.createElement('img');
+        const size = { width: 0, height: 0 };
+        Object.defineProperty(image, 'naturalWidth', { get: () => size.width });
+        Object.defineProperty(image, 'naturalHeight', { get: () => size.height });
+        document.body.appendChild(image);
+        const editor = track(MarkinJS.create(image, { silent: true }));
+        setBox(editor.getSVGElement(), HALF.box);
+        expect(editor.getView()).toBe(null);
+        expect(editor.zoomBy(2)).toBe(false);
+
+        size.width = 1600;
+        size.height = 1200;
+        image.dispatchEvent(new Event('load'));
+        expect(editor.getView()).toEqual({ x: 0, y: 0, width: 1600, height: 1200, scale: 0.5 });
+    });
+
     it('has no view to speak of before the page is laid out', () => {
         const { editor } = makeEditor({}, { box: null });
         expect(editor.getView()).toBe(null);
@@ -572,6 +589,65 @@ describe('a stage the page marked', () => {
         editor.destroy();
         expect(stage.style.transform).toBe('rotate(0deg)');
         expect(viewport.style.overflow).toBe('auto');
+    });
+});
+
+describe('a viewport the page shares with other things', () => {
+    // The page's own viewport, with a toolbar in it next to the stage.
+    function shared() {
+        const viewport = document.createElement('section');
+        viewport.style.cursor = 'crosshair';
+        viewport.innerHTML =
+            '<div data-markin-stage style="user-select: text;"><svg viewBox="0 0 800 600"></svg></div><nav><button>tool</button></nav>';
+        document.body.appendChild(viewport);
+        const stage = viewport.firstChild;
+        const svg = stage.firstChild;
+        setBox(viewport, { left: 0, top: 0, width: 800, height: 600 });
+        setBox(stage, { left: 0, top: 0, width: 800, height: 600 });
+        setBox(svg, { left: 0, top: 0, width: 800, height: 600 });
+        const editor = track(MarkinJS.create(svg, { silent: true, annotations: [BOX] }));
+        return { editor, viewport, stage, svg, button: viewport.querySelector('button') };
+    }
+
+    it('leaves what the page put there to the page', async () => {
+        const { editor, svg, button } = shared();
+        const heard = [];
+        for (const type of ['canvasclick', 'deselect', 'hover']) editor.on(type, () => heard.push(type));
+        editor.select('A');
+        editor.zoomBy(2);
+        const before = editor.getView();
+
+        click(button, 400, 300);
+        press(button, 400, 300);
+        move(300, 250);
+        release(300, 250);
+        const turned = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -10, ctrlKey: true });
+        button.dispatchEvent(turned);
+        button.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 400, clientY: 300 }));
+        await nextFrame();
+        expect(turned.defaultPrevented).toBe(false);
+        expect(heard).toEqual([]);
+        expect(editor.getView()).toEqual(before);
+        expect(editor.getSelection().id).toBe('A');
+
+        // The picture itself still answers.
+        click(svg, 700, 500);
+        expect(heard).toEqual(['deselect', 'canvasclick']);
+    });
+
+    it('keeps a drag from selecting the page, and gives the styles it borrowed back', () => {
+        const { editor, viewport, stage, svg } = shared();
+        expect(stage.style.userSelect).toBe('none');
+        editor.zoomBy(2);
+        press(svg, 700, 500);
+        move(600, 400);
+        expect(viewport.style.cursor).toBe('grabbing');
+        release(600, 400);
+        expect(viewport.style.cursor).toBe('crosshair');
+        editor.destroy();
+        expect(stage.style.userSelect).toBe('text');
+        expect(viewport.style.cursor).toBe('crosshair');
+        expect(viewport.style.overflow).toBe('');
     });
 });
 

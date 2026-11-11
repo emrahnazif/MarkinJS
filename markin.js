@@ -82,7 +82,7 @@ const MarkinJS = (function () {
         hovercanvas: 'hover'
     };
     const OLD_OPTIONS = {
-        zoom: 'removed: sizes now follow the on-screen scale automatically',
+        zoom: 'removed: zoom is built in (see zoomBy and setView), and sizes follow the on-screen scale',
         autoResizeBbox: 'removed: it never had an effect',
         keypointSkeleton: 'renamed to "skeleton"',
         keypointSkeletonStyle: 'renamed to "skeletonStyle"'
@@ -678,10 +678,16 @@ const MarkinJS = (function () {
             const viewport = marked.parentElement;
             if (!viewport) return null;
             const saved = [marked.style.transform, marked.style.transformOrigin, viewport.style.overflow];
+            const cursor = viewport.style.cursor;
+            const select = marked.style.userSelect;
+            // A drag across the stage moves the view; it must not select the page around it.
+            marked.style.userSelect = 'none';
             const teardown = () => {
                 [marked.style.transform, marked.style.transformOrigin, viewport.style.overflow] = saved;
+                viewport.style.cursor = cursor;
+                marked.style.userSelect = select;
             };
-            return { container: viewport, stage: marked, saved, teardown };
+            return { container: viewport, stage: marked, saved, cursor, teardown };
         }
         if (!svg.parentNode) return null;
 
@@ -850,6 +856,8 @@ const MarkinJS = (function () {
             if (!this.host && typeof Observer === 'function') {
                 const observer = new Observer(() => this._layoutChanged());
                 observer.observe(svg);
+                // A viewport the page sizes can change while the <svg> stays as it is.
+                if (this.viewport) observer.observe(this.viewport);
                 this.cleanup.push(() => observer.disconnect());
             }
         }
@@ -890,6 +898,7 @@ const MarkinJS = (function () {
             this.chrome = [];
             this.sel = null;
             this.hoverEvent = null;
+            this.pressed = null;
             this.history = { states: [[]], index: 0 };
         }
 
@@ -1126,6 +1135,9 @@ const MarkinJS = (function () {
             const m = this._matrix();
             const box = vp.getBoundingClientRect();
             if (!m || !(box.width > 0 && box.height > 0)) return null;
+            const vb = this._viewBox();
+            // An image that has not arrived yet has no size to speak of.
+            if (this.host && !vb) return null;
             // Scaled by the page around the editor, a layout pixel is `kx` by `ky` pixels on screen.
             // The <svg> knows exactly; it is inside the stage, so its own figure includes the view.
             // The viewport's size is the fallback, and that is rounded to whole pixels.
@@ -1142,7 +1154,6 @@ const MarkinJS = (function () {
             const ox = (stage.left - left) / kx - v.x;
             const oy = (stage.top - top) / ky - v.y;
             // ... and the picture, in the stage's own pixels, which no view changes.
-            const vb = this._viewBox();
             const own = this.svg.getBoundingClientRect();
             const image = vb || { x: 0, y: 0, w: own.width / Math.abs(m.a), h: own.height / Math.abs(m.d) };
             const xs = [];
@@ -1419,12 +1430,17 @@ const MarkinJS = (function () {
             return !this.dead && !!this.viewport && this.opts.zoomControls;
         }
 
+        // True for an event on the picture or on the bare viewport around it. Anything else the
+        // page put inside its own viewport, a toolbar for one, keeps its events to itself.
+        _onCanvas(event) {
+            const target = event.target;
+            return target === this.viewport || (this.stage || this.svg).contains(target);
+        }
+
         // A wheel or a trackpad. Pinching a trackpad also arrives here, as a wheel with Ctrl held
         // (Chrome, Firefox, Edge); WebKit sends gesture events instead.
         _onWheel(event) {
-            if (!this._pans()) return;
-            const g = this._geometry();
-            if (!g) return;
+            if (!this._pans() || !this._onCanvas(event)) return;
             const pinch = event.ctrlKey || event.metaKey;
             const zooms = pinch || this.opts.wheel === 'zoom';
             // One movement of the wheel or the fingers is many events, and whose it is gets decided
@@ -1437,6 +1453,8 @@ const MarkinJS = (function () {
             if (first) run = this.wheelRun = { zooms, ours: pinch };
             run.at = now;
             if (!first && !run.ours) return;
+            const g = this._geometry();
+            if (!g) return;
 
             const lines = event.deltaMode === 1 ? WHEEL_LINE : event.deltaMode === 2 ? g.height * g.ky : 1;
             let dx = (event.deltaX || 0) * lines;
@@ -1460,7 +1478,7 @@ const MarkinJS = (function () {
         // A trackpad pinch in WebKit (Safari, and the web views built on it). `event.scale` is how
         // far the fingers have moved apart since the pinch began. Prevented, or the whole page zooms.
         _onPinch(event) {
-            if (!this._pans()) return;
+            if (!this._pans() || !this._onCanvas(event)) return;
             event.preventDefault();
             if (event.type === 'gestureend') {
                 this.pinch = null;
@@ -2418,6 +2436,7 @@ const MarkinJS = (function () {
             // One press is heard on the <svg> and, unless that took it, again on the viewport.
             if (this.pressed === event) return;
             this.pressed = event;
+            if (!this._onCanvas(event)) return;
             this.inside = true;
             // A disabled editor edits nothing, but its view still moves and a click is still reported.
             const editing = this.enabled;
@@ -2505,7 +2524,7 @@ const MarkinJS = (function () {
 
         // The middle button must not start the browser's own scrolling, paste or open anything.
         _onMiddle(event) {
-            if (event.button === 1 && this._pans()) event.preventDefault();
+            if (event.button === 1 && this._pans() && this._onCanvas(event)) event.preventDefault();
         }
 
         // A press that is being followed must not turn into the browser dragging the image away.
@@ -2761,7 +2780,7 @@ const MarkinJS = (function () {
         }
 
         _onHover(event) {
-            if (this.gesture || (!this.enabled && !this.viewport)) return;
+            if (this.gesture || (!this.enabled && !this.viewport) || !this._onCanvas(event)) return;
             this.hoverEvent = { clientX: event.clientX, clientY: event.clientY, target: event.target };
             if (this.hoverFrame) return;
             this.hoverFrame = this._frame(() => {

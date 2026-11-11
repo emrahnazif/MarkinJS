@@ -339,7 +339,7 @@ describe('an editor on an <svg>', () => {
 
     it('uses the stage the page marked, and leaves the markup alone', () => {
         const { holder, svg, html } = page(
-            '<section><div data-markin-stage style="position: relative"><img alt=""><svg viewBox="0 0 800 600"></svg></div></section>'
+            '<section><div data-markin-stage style="position: relative;"><img alt=""><svg viewBox="0 0 800 600"></svg></div></section>'
         );
         const { log, logger } = collect();
         const editor = MarkinJS.create(svg, { logger });
