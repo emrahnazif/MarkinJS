@@ -23,6 +23,14 @@ Comprehensive API reference with examples:
 
 **Perfect for**: Development reference, API exploration
 
+### 👻 [Preview](./preview.html)
+A suggestion that follows the pointer and becomes an annotation on a click:
+- `setPreview()` shows a shape that is not data: no `change`, no undo step
+- A disabled editor still reports `hover` and `canvasclick` to the page's own tool
+- `createAnnotation()` keeps the suggestion
+
+**Perfect for**: Model-assisted labelling, where a model proposes and the user accepts
+
 ## Quick Start
 
 1. **Choose an example** based on your use case
@@ -37,6 +45,7 @@ Comprehensive API reference with examples:
 examples/
 ├── index.html           # Interactive demo with all features
 ├── api.html             # API documentation and examples
+├── preview.html         # A suggestion that becomes an annotation
 ├── assets/              # Shared resources
 │   ├── css/            # Stylesheets
 │   ├── images/         # Sample images

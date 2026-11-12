@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html class="has-navbar-fixed-top" lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>MarkinJS Preview Example</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="assets/css/bulma.min.css">
+    <link rel="stylesheet" href="assets/css/child.css">
+    <!-- The source file works as a plain script. No build step is needed to run this page. -->
+    <script src="../markin.js"></script>
+
+    <style>
+        .stage {
+            padding: 14px;
+            background: #0f172a;
+            border-radius: 6px;
+            line-height: 0;
+        }
+
+        .stage img {
+            display: block;
+            width: 100%;
+            max-width: none;
+        }
+
+        .stage.suggesting {
+            cursor: crosshair;
+        }
+    </style>
+</head>
+
+<body>
+    <nav class="navbar is-fixed-top is-white" role="navigation" aria-label="main navigation">
+        <div class="container">
+            <div class="navbar-brand">
+                <a class="navbar-item" href="index.html">
+                    <strong>MarkinJS</strong>
+                </a>
+            </div>
+            <div class="navbar-menu">
+                <div class="navbar-end">
+                    <div class="navbar-item">
+                        <div class="buttons">
+                            <a href="index.html" class="button is-light">Home</a>
+                            <a href="api.html" class="button is-light">API Documentation</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <section class="section">
+        <div class="container">
+            <h1 class="title">A preview that becomes an annotation</h1>
+            <h2 class="subtitle">
+                Move the pointer over the boat, the tyre, the chair or the church: the dashed outline is a suggestion.
+                Click to keep it.
+            </h2>
+        </div>
+    </section>
+
+    <section class="section pt-0">
+        <div class="container">
+            <div class="buttons">
+                <button id="tool" class="button is-dark is-small" aria-pressed="true">Suggest tool: on</button>
+                <button id="clear" class="button is-light is-small">Clear</button>
+                <button id="fit" class="button is-light is-small">Fit</button>
+            </div>
+            <div class="stage suggesting" id="stage">
+                <img id="demo-image" src="assets/images/image.jpg" alt="Harbour with boats, a tyre and chairs">
+            </div>
+            <p class="help" id="info"></p>
+            <p class="help">
+                While the tool is on the editor is disabled, so the page has the pointer: <code>hover</code> says where
+                it is and <code>setPreview()</code> shows what would be added there. Zoom in (pinch, or Ctrl / Cmd and
+                scroll) and the suggestion stays in place. Switch the tool off to edit what you kept.
+            </p>
+        </div>
+    </section>
+
+    <script>
+        const CLASSES = [
+            { id: 0, name: 'boat', color: '#2563eb' },
+            { id: 1, name: 'chair', color: '#16a34a' },
+            { id: 2, name: 'tyre', color: '#dc2626' },
+            { id: 3, name: 'building', color: '#d97706' }
+        ];
+
+        // What stands in for a model on this page: four outlines somebody drew by hand, in image
+        // pixels of assets/images/image.jpg (1280 x 853). A real page would ask its model, or its
+        // server, what is at the pointer. MarkinJS does not care where a shape comes from.
+        const ellipse = (cx, cy, rx, ry, n = 24) =>
+            Array.from({ length: n }, (_, i) => {
+                const a = (i / n) * 2 * Math.PI;
+                return [Math.round(cx + rx * Math.cos(a)), Math.round(cy + ry * Math.sin(a))];
+            });
+        const KNOWN = [
+            {
+                class_id: 0,
+                bbox: [557, 545, 302, 96],
+                segments: [[560, 606], [574, 582], [846, 546], [857, 550], [851, 636], [563, 638]]
+            },
+            { class_id: 1, bbox: [1012, 618, 142, 228] },
+            { class_id: 2, bbox: [143, 586, 112, 80], segments: ellipse(199, 626, 56, 40) },
+            { class_id: 3, bbox: [652, 204, 96, 72] }
+        ];
+        const shapeAt = ({ x, y }) =>
+            KNOWN.find(({ bbox: [bx, by, w, h] }) => x >= bx && x <= bx + w && y >= by && y <= by + h) || null;
+
+        const $ = (id) => document.getElementById(id);
+        const editor = MarkinJS.create('demo-image', {
+            colors: Object.fromEntries(CLASSES.map((c) => [c.id, c.color]))
+        });
+
+        let suggestion = null;
+        // The boxes of what was kept, so that it is not suggested again. `change` says what the
+        // data is now, also after an undo.
+        let kept = new Set();
+
+        function report() {
+            $('info').textContent = suggestion
+                ? `Suggestion: ${CLASSES[suggestion.class_id].name}. Click to keep it.`
+                : `${kept.size} kept.`;
+        }
+
+        function suggest(shape) {
+            const next = shape && !kept.has(String(shape.bbox)) ? shape : null;
+            // The pointer mostly moves within one object: nothing to do then.
+            if (next === suggestion) return;
+            suggestion = next;
+            editor.setPreview(next);
+            report();
+        }
+
+        function setTool(on) {
+            // A disabled editor edits nothing, and still says where the pointer is and where it clicked.
+            if (on) editor.disable();
+            else editor.enable();
+            suggest(null);
+            $('tool').textContent = `Suggest tool: ${on ? 'on' : 'off'}`;
+            $('tool').setAttribute('aria-pressed', String(on));
+            $('stage').classList.toggle('suggesting', on);
+        }
+
+        editor.on('change', (annotations) => {
+            kept = new Set(annotations.map((a) => String(a.bbox)));
+            report();
+        });
+        editor.on('hover', ({ position }) => {
+            if (!editor.isEnabled()) suggest(shapeAt(position));
+        });
+        editor.on('canvasclick', () => {
+            if (!suggestion) return;
+            // The preview was never data. This is the moment it becomes an annotation: one change, one undo step.
+            editor.createAnnotation(suggestion, { select: false });
+            suggest(null);
+        });
+        $('stage').addEventListener('pointerleave', () => suggest(null));
+
+        $('tool').addEventListener('click', () => setTool(editor.isEnabled()));
+        $('clear').addEventListener('click', () => editor.clear());
+        $('fit').addEventListener('click', () => editor.fit());
+
+        setTool(true);
+        report();
+    </script>
+</body>
+
+</html>
