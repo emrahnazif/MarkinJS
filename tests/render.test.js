@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { makeEditor, click, drag, bboxEl, polygonEl, keypointEl, handles, num } from './setup.js';
+import { makeEditor, click, drag, bboxEl, polygonEl, keypointEl, handles, num, boxOf } from './setup.js';
 
 const POSE = {
     id: 'P',
@@ -25,7 +25,7 @@ describe('what gets drawn', () => {
     it('one rect, one polygon and one circle per keypoint, with hooks for CSS', () => {
         const { svg } = makeEditor({ annotations: [POSE] });
         const rect = bboxEl(svg, 'P');
-        expect(['x', 'y', 'width', 'height'].map((a) => num(rect, a))).toEqual([100, 100, 200, 200]);
+        expect(boxOf(rect)).toEqual([100, 100, 200, 200]);
         expect(rect.getAttribute('class')).toBe('markin-bbox');
         expect(polygonEl(svg, 'P').getAttribute('points')).toBe('120,120 280,120 280,280');
         expect(polygonEl(svg, 'P').getAttribute('class')).toBe('markin-polygon');
@@ -82,7 +82,7 @@ describe('what gets drawn', () => {
         const rect = bboxEl(svg, 'P');
         editor.updateAnnotation('P', { bbox: [50, 60, 70, 80], keypoints: [POSE.keypoints[0]], segments: null });
         expect(bboxEl(svg, 'P')).toBe(rect);
-        expect(['x', 'y', 'width', 'height'].map((a) => num(rect, a))).toEqual([50, 60, 70, 80]);
+        expect(boxOf(rect)).toEqual([50, 60, 70, 80]);
         expect(svg.querySelectorAll('[data-markin-part="keypoint"]').length).toBe(1);
         expect(polygonEl(svg, 'P')).toBe(null);
     });

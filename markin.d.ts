@@ -240,6 +240,14 @@ declare namespace MarkinJS {
         /** Remove everything, as one undoable step. */
         clear(): void;
 
+        /**
+         * Show one shape that is not an annotation, or remove it with `null`: a suggestion, what a tool would
+         * draw at the pointer, a highlight. Its `bbox` and `segments` are
+         * drawn, dashed, in the colour of its `class_id`. It is not in the data, emits no `change`, adds no
+         * undo step and takes no pointer events. Returns `false` when the shape is invalid.
+         */
+        setPreview(shape?: Annotation | null): boolean;
+
         /** Select an annotation, or one part of it. `index` is the keypoint index. */
         select(id: string | number, part?: Part | null, index?: number): boolean;
         deselect(): boolean;

@@ -325,5 +325,6 @@ export const handleEl = (svg, name, index) =>
     );
 export const handles = (svg) => Array.from(svg.querySelectorAll('.markin-ui [data-markin-handle]'));
 export const num = (el, name) => parseFloat(el.getAttribute(name));
+export const boxOf = (rect) => ['x', 'y', 'width', 'height'].map((a) => num(rect, a));
 export const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 export const nextFrame = () => wait(40);

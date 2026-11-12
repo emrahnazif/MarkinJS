@@ -122,6 +122,8 @@ const MarkinJS = (function () {
     const hasBox = (a) => Array.isArray(a.bbox);
     const hasPolygon = (a) => Array.isArray(a.segments) && a.segments.length >= 3;
     const keypointsOf = (a) => (Array.isArray(a.keypoints) ? a.keypoints : []);
+    // The points of a polygon as its `points` attribute takes them.
+    const pointsText = (segments) => segments.map((p) => `${p[0]},${p[1]}`).join(' ');
     const hasGeometry = (a) => hasBox(a) || hasPolygon(a) || keypointsOf(a).length > 0;
     // A keypoint with v = 0 is "not labelled": it is not drawn and never moves with its annotation.
     const isLabelled = (kp) => kp.v !== 0;
@@ -885,6 +887,7 @@ const MarkinJS = (function () {
             this.inside = false; // the pointer is over the editor
             this.pressed = null; // the press last heard, which arrives once on the <svg> and once on the viewport
             this.warnedBounds = false;
+            this.preview = null; // the shape shown as a suggestion, which is not an annotation, and its nodes
 
             this._build();
             try {
@@ -1025,6 +1028,7 @@ const MarkinJS = (function () {
             this.dom.clear();
             this.chrome = [];
             this.sel = null;
+            this.preview = null;
             this.hoverEvent = null;
             this.pressed = null;
             this.history = { states: [[]], index: 0 };
@@ -1131,8 +1135,9 @@ const MarkinJS = (function () {
             if (away && !this.host && this.svg.getAttribute('viewBox') !== away.viewBox) this._newPicture();
         }
 
-        // Another picture in the same place starts at rest.
+        // Another picture in the same place starts at rest, and a preview was of the earlier one.
         _newPicture() {
+            this.setPreview(null);
             this._resetView();
             this.refresh();
         }
@@ -2130,6 +2135,47 @@ const MarkinJS = (function () {
             return this.list.map(copy);
         }
 
+        // ---- preview
+
+        // Show one shape that is not an annotation: a suggestion the page may turn into one with
+        // createAnnotation(). It takes the fields of an annotation, of which the bbox and the
+        // polygon are drawn. It is no data: nothing is announced or recorded, it cannot be
+        // touched, and load() and clear() leave it where it is. `null` takes it away.
+        setPreview(shape) {
+            if (this.dead) return false;
+            let value = null;
+            if (shape != null) {
+                const result = parseAnnotation(shape);
+                const drawn = !result.error && (hasBox(result.value) || hasPolygon(result.value));
+                if (!drawn) {
+                    this._problem(`setPreview: ${result.error || 'a preview needs a bbox or segments'}`);
+                    return false;
+                }
+                value = result.value;
+            }
+            if (!value) {
+                if (this.preview) this.preview.group.remove();
+                this.preview = null;
+                return true;
+            }
+            if (!this.preview) {
+                // It lies above every annotation and takes no pointer events, so what is under it
+                // is hovered and clicked as if it were not there.
+                const d = (this.preview = {
+                    shape: null,
+                    group: this._el('g', { class: 'markin-preview', 'pointer-events': 'none', 'stroke-opacity': 0.9 }),
+                    bbox: this._el('rect', { class: 'markin-bbox', 'fill-opacity': 0.06 }),
+                    polygon: this._el('polygon', { class: 'markin-polygon', 'fill-opacity': 0.12 }),
+                    segments: null // the points the polygon was last drawn from
+                });
+                d.group.append(d.bbox, d.polygon);
+                this.layer.insertBefore(d.group, this.uiLayer);
+            }
+            this.preview.shape = value;
+            this._renderPreview();
+            return true;
+        }
+
         // A bbox reaching outside the image usually means [x1, y1, x2, y2] was passed by mistake.
         _warnOutOfBounds(annotations) {
             if (this.warnedBounds) return;
@@ -2408,7 +2454,7 @@ const MarkinJS = (function () {
             // The points of a large polygon make a long string. It is only rebuilt when they changed,
             // which the frozen array tells by identity.
             if (polygon && d.segments !== ann.segments) {
-                polygon.setAttribute('points', ann.segments.map((p) => `${p[0]},${p[1]}`).join(' '));
+                polygon.setAttribute('points', pointsText(ann.segments));
             }
             d.segments = polygon ? ann.segments : null;
 
@@ -2484,21 +2530,49 @@ const MarkinJS = (function () {
             this.dom.delete(key);
         }
 
+        // The look of the preview is in attributes, which a page's CSS for `.markin-preview` overrides.
+        _renderPreview() {
+            const d = this.preview;
+            if (!d) return;
+            const shape = d.shape;
+            const u = this.unit;
+            const color = this._color(shape);
+            setAttrs(d.group, {
+                fill: color,
+                stroke: color,
+                'stroke-dasharray': `${3 * u} ${3 * u}`,
+                'data-class-id': shape.class_id
+            });
+            // A part the shape does not have stays in the group, unseen, for the next shape.
+            const box = hasBox(shape) ? shape.bbox : null;
+            const [x, y, width, height] = box || [];
+            setAttrs(d.bbox, { x, y, width, height, display: box ? null : 'none' });
+            const segments = hasPolygon(shape) ? shape.segments : null;
+            if (segments && d.segments !== segments) {
+                d.polygon.setAttribute('points', pointsText(segments));
+                d.segments = segments;
+            }
+            setAttrs(d.polygon, { display: segments ? null : 'none' });
+        }
+
         _renderAll() {
             this.layer.setAttribute('stroke-width', this.opts.strokeWidth * this.unit);
             for (const ann of this.list) this._render(ann);
             this._reorder();
+            this._renderPreview();
             this._renderUI();
         }
 
         // The on-screen scale changed. Outlines follow through the layer's stroke width; only
-        // keypoints, skeletons and the selection are sized one by one, so nothing else is redrawn.
+        // keypoints, skeletons, the selection and the dashes of the preview are sized one by one, so
+        // nothing else is redrawn.
         _rescale() {
             this.layer.setAttribute('stroke-width', this.opts.strokeWidth * this.unit);
             const selected = this.sel ? this.byId.get(this.sel.key) : null;
             for (const ann of this.list) {
                 if (ann === selected || keypointsOf(ann).length) this._render(ann);
             }
+            this._renderPreview();
             this._renderUI();
         }
 
@@ -3115,6 +3189,7 @@ const MarkinJS = (function () {
         'getAnnotations',
         'load',
         'clear',
+        'setPreview',
         'select',
         'deselect',
         'getSelection',
