@@ -141,6 +141,47 @@ MarkinJS.denormalize(annotations, width, height);     // fractions -> pixels
 Invalid input never throws and never changes anything: the method returns `null` / `false` and the reason is
 logged. Pass `strict: true` to get a `TypeError` instead.
 
+### Preview
+
+| Method | Description |
+|---|---|
+| `setPreview(shape)` | Show one shape that is not an annotation. `setPreview(null)` removes it. Returns `false` if the shape is invalid. |
+
+A preview is a shape that is shown on the image without being part of your data. Use it for anything temporary:
+
+- a suggestion the user can accept or ignore, from a model or from your own rules;
+- what a tool of yours would draw at the pointer, before the click that draws it;
+- a shape that is about to be pasted, imported or moved somewhere;
+- a highlight: the result of a search, or the item a list on your page points at.
+
+`shape` has the fields of an annotation, in image pixels. Its `bbox` and its `segments` are drawn, dashed, in the
+colour of its `class_id`, and follow the view like everything else. It is not data:
+
+- it is not in `getAnnotations()`, emits no `change` and adds no undo step, so it is cheap to set as often as on
+  every mouse move;
+- pointer events pass through it: what lies under it is hovered, clicked and dragged as before;
+- `load()` and `clear()` leave it alone. It goes with `setPreview(null)`, with `destroy()`, and when the `<img>`
+  shows another picture.
+
+There is one preview at a time, in an enabled or a disabled editor. To keep one, pass the same shape to
+`createAnnotation()`. For example, a tool of your own that suggests a shape under the pointer and adds it on a click:
+
+```js
+editor.disable(); // your own tool has the pointer; `hover` and `canvasclick` still arrive
+let suggestion = null;
+editor.on('hover', ({ position }) => {
+    suggestion = shapeAt(position); // your code: { class_id, bbox, segments } or null
+    editor.setPreview(suggestion);
+});
+editor.on('canvasclick', () => {
+    if (!suggestion) return;
+    editor.createAnnotation(suggestion);
+    editor.setPreview(null);
+});
+```
+
+[examples/preview.html](examples/preview.html) is that tool as a page.
+
 ### Selection
 
 | Method | Description |
@@ -354,7 +395,8 @@ Everything MarkinJS draws lives in one `<g class="markin-layer">` and is output 
 For CSS there are stable hooks:
 
 `.markin-annotation[data-class-id][data-selected]`, `.markin-bbox`, `.markin-polygon`,
-`.markin-keypoint[data-name][data-v]`, `.markin-skeleton`, `.markin-handle`.
+`.markin-keypoint[data-name][data-v]`, `.markin-skeleton`, `.markin-handle`,
+`.markin-preview[data-class-id]` (with a `.markin-bbox` and a `.markin-polygon` of its own).
 
 ## Frameworks (React, Vue, …)
 

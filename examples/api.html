@@ -243,6 +243,38 @@ MarkinJS.denormalize(annotations, width, height);  // fractions -&gt; pixels</co
                                 Invalid input never throws and never changes anything: the method returns <code>null</code> or <code>false</code>
                                 and the reason is logged. Pass <code>strict: true</code> to get a <code>TypeError</code> instead.
                             </p>
+                            <h3 class="title is-5">Preview</h3>
+                            <div class="table-container">
+                                <table class="table is-striped is-fullwidth">
+                                    <thead><tr><th>Method</th><th>Description</th></tr></thead>
+                                    <tbody>
+                                        <tr><td><code>setPreview(shape)</code></td><td>Show one shape that is not an annotation. <code>setPreview(null)</code> removes it. Returns <code>false</code> if the shape is invalid.</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <p>
+                                A preview is a shape that is shown on the image without being part of your data. Use it for anything
+                                temporary:
+                            </p>
+                            <ul>
+                                <li>a suggestion the user can accept or ignore, from a model or from your own rules;</li>
+                                <li>what a tool of yours would draw at the pointer, before the click that draws it;</li>
+                                <li>a shape that is about to be pasted, imported or moved somewhere;</li>
+                                <li>a highlight: the result of a search, or the item a list on your page points at.</li>
+                            </ul>
+                            <p>
+                                <code>shape</code> has the fields of an annotation, in image pixels. Its <code>bbox</code> and its
+                                <code>segments</code> are drawn, dashed, in the colour of its <code>class_id</code>, and follow the view
+                                like everything else. There is one preview at a time, in an enabled or a disabled editor.
+                            </p>
+                            <p>
+                                It is not data: it is not in <code>getAnnotations()</code>, emits no <code>change</code> and adds no undo
+                                step, so it is cheap to set as often as on every mouse move. Pointer events pass through it.
+                                <code>load()</code> and <code>clear()</code> leave it alone; it goes with <code>setPreview(null)</code>,
+                                with <code>destroy()</code>, and when the <code>&lt;img&gt;</code> shows another picture. To keep one, pass
+                                the same shape to <code>createAnnotation()</code>. The <a href="preview.html">preview example</a> does that
+                                on a click.
+                            </p>
                         </section>
 
                         <section id="selection">
