@@ -8,7 +8,7 @@
 const MarkinJS = (function () {
     'use strict';
 
-    const VERSION = '0.3.2';
+    const VERSION = '0.4.0';
     const SVG_NS = 'http://www.w3.org/2000/svg';
 
     const EVENTS = [
