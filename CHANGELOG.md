@@ -5,6 +5,15 @@ All notable changes to MarkinJS will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `setPreview(shape)` shows one shape that is not an annotation: a suggestion to accept, what a tool would draw at
+  the pointer, a highlight. Its `bbox` and `segments` are drawn dashed in the colour of its class, and follow the view like
+  everything else. It is not in the data, emits no `change`, adds no undo step and lets pointer events through.
+  `setPreview(null)` removes it. Style it through `.markin-preview`.
+- `examples/preview.html`: a suggestion that follows the pointer and becomes an annotation on a click.
+
 ## [0.3.2] - 2026-11-11
 
 ### Fixed
