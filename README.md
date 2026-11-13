@@ -374,6 +374,10 @@ letters are often shortcuts of the app around the editor.
 - Given an `<img>`, MarkinJS wraps it in a viewport (`<div class="markin-container">`) and, inside that, a stage
   (`<div class="markin-stage">`) that holds the image and an `<svg>` laid over it. `destroy()` unwraps. An `<svg>`
   of your own stays where it is.
+- The wrapping follows how the image is laid out when `create()` runs, and only then. An image your CSS sizes
+  (`width: 100%; height: 100%`, `object-fit`) has to have that CSS by then; if a style sheet can still be on its
+  way, render the viewport, the stage and the `<svg>` yourself (see [Frameworks](#frameworks-react-vue-)), so the
+  layout is right before any script runs.
 - The `<svg>` is never scaled. Zoomed in, its `viewBox` is the part of the image that is visible, so outlines and
   handles are drawn at the size they have on screen and stay sharp at every zoom, in every browser (a layer that
   is scaled with CSS is one that Safari and other WebKit views may enlarge as a bitmap). Only the `<img>` under
