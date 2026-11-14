@@ -98,6 +98,50 @@ describe('selecting', () => {
         expect(editor.getSelection().id).toBe('A');
     });
 
+    it('a drag across the empty canvas reports the box it spans, as it moves and when it ends', () => {
+        const { editor, svg } = makeEditor({ annotations: [BOX] });
+        const moves = [];
+        const ends = [];
+        editor.on('canvasdrag', (e) => moves.push(e.box));
+        editor.on('canvasdragend', (e) => ends.push(e));
+        drag(svg, [600, 450], [500, 400]); // up and to the left: the box is still x, y, width, height
+        expect(moves).toEqual([
+            [550, 425, 50, 25],
+            [500, 400, 100, 50]
+        ]);
+        expect(ends).toEqual([{ box: [500, 400, 100, 50], cancelled: false }]);
+    });
+
+    it('a press that moves less than a drag is a click, not a box', () => {
+        const { editor, svg } = makeEditor({ annotations: [BOX] });
+        const events = [];
+        editor.on('canvasdrag', () => events.push('drag'));
+        editor.on('canvasdragend', () => events.push('dragend'));
+        editor.on('canvasclick', () => events.push('click'));
+        drag(svg, [500, 400], [501, 401]);
+        expect(events).toEqual(['click']);
+    });
+
+    it('the box stays inside the image, and a disabled editor reports it too', () => {
+        const { editor, svg } = makeEditor({ annotations: [BOX] });
+        editor.disable();
+        const ends = [];
+        editor.on('canvasdragend', (e) => ends.push(e.box));
+        drag(svg, [700, 500], [900, 700]); // past the 800 x 600 image
+        expect(ends).toEqual([[700, 500, 100, 100]]);
+    });
+
+    it('Escape cancels a box drag', () => {
+        const { editor, svg } = makeEditor({ annotations: [BOX] });
+        const ends = [];
+        editor.on('canvasdragend', (e) => ends.push(e));
+        press(svg, 500, 400);
+        move(560, 440);
+        key('Escape');
+        release(560, 440);
+        expect(ends).toEqual([{ box: [500, 400, 60, 40], cancelled: true }]);
+    });
+
     it('select() works from code and validates the part', () => {
         const { editor, svg, log } = makeEditor({ annotations: [POSE, { id: 'K', keypoints: [{ point: [5, 5] }] }] });
         expect(editor.select('P')).toBe(true);

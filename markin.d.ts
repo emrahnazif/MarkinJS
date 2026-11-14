@@ -193,6 +193,15 @@ declare namespace MarkinJS {
         position: Point;
     }
 
+    interface CanvasDragEvent {
+        /** The box the drag spans, `[x, y, width, height]` in image pixels. */
+        box: [number, number, number, number];
+    }
+
+    interface CanvasDragEndEvent extends CanvasDragEvent {
+        cancelled: boolean;
+    }
+
     interface EventMap {
         /** After every completed edit, including undo and redo. Not after `load()`. */
         change: (annotations: StoredAnnotation[], info: ChangeInfo) => void;
@@ -208,6 +217,13 @@ declare namespace MarkinJS {
          * editor that is every click.
          */
         canvasclick: (event: CanvasClickEvent) => void;
+        /**
+         * A drag across the empty canvas that does not move the view (it would, zoomed in, with
+         * `panOnEmpty`): the box it spans so far, as the pointer moves. Also in a disabled editor.
+         */
+        canvasdrag: (event: CanvasDragEvent) => void;
+        /** That drag ended: the box it spans; `cancelled` if it was (Escape, or the press was lost). */
+        canvasdragend: (event: CanvasDragEndEvent) => void;
         /** The view moved or the canvas changed size: at most once per frame. Also once for the first view. */
         viewchange: (view: View) => void;
         /**

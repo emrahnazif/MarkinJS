@@ -5,6 +5,14 @@ All notable changes to MarkinJS will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-11-14
+
+### Added
+- `canvasdrag` and `canvasdragend`: a drag across empty canvas that does not move the view reports the box it spans,
+  `[x, y, width, height]` in image pixels, inside the image with `constrainToImage`. Also in a disabled editor. A host's
+  tool that draws a box (to find an object in, say) no longer needs its own pointer handling or its own copy of the
+  click/drag threshold. Escape cancels it.
+
 ## [0.4.0] - 2026-11-12
 
 ### Added

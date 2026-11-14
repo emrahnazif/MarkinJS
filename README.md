@@ -48,10 +48,10 @@ const MarkinJS = require('markinjs'); // CommonJS
 
 ```html
 <!-- From a CDN, pinned to a version -->
-<script src="https://unpkg.com/markinjs@0.4.0/dist/markin.min.js"></script>
+<script src="https://unpkg.com/markinjs@0.5.0/dist/markin.min.js"></script>
 
 <!-- Or a copy in your app. Keep the version in the file name, so an update is always a visible change. -->
-<script src="/static/js/markin-0.4.0.min.js"></script>
+<script src="/static/js/markin-0.5.0.min.js"></script>
 ```
 
 The build writes `dist/markin-<version>.min.js` for exactly this purpose. The source file `markin.js` also
@@ -232,6 +232,8 @@ See [Zoom and pan](#zoom-and-pan) for what the user can do and for the limits.
 | `dragend` | the same plus `changed`, `cancelled` | A drag ended. A `change` follows if something changed. |
 | `hover` | `{ position, id, part, index }` | The pointer moved over the canvas (at most once per frame). |
 | `canvasclick` | `{ position }` | A click that hit no annotation and was not a drag of the view. |
+| `canvasdrag` | `{ box }` | A drag across empty canvas that does not move the view: the box it spans so far, `[x, y, width, height]`. |
+| `canvasdragend` | `{ box, cancelled }` | That drag ended (Escape cancels it). |
 | `viewchange` | `{ x, y, width, height, scale }` | The view moved or the canvas changed size (at most once per frame). Also once for the first view. |
 | `viewsettle` | `{ x, y, width, height, scale }` | The view has been still for `settleDelay` and shows another part of the image than when this last fired. Also for the first view, and for a new picture. |
 
@@ -244,7 +246,13 @@ A press on an annotation does not bubble as `pointerdown` or `mousedown`; listen
 `select`, if the rest of your page needs to know about it. A press on empty canvas bubbles as usual. The `click`
 that the browser sends when a drag of the view is released is swallowed, so it is never taken for a click.
 
-A disabled editor still emits `hover` (with `id: null`) and `canvasclick` (for every click, wherever it lands).
+A disabled editor still emits `hover` (with `id: null`), `canvasclick` (for every click, wherever it lands) and
+`canvasdrag` / `canvasdragend` (for every drag that does not move the view).
+
+A press counts as a drag once it moves 3 screen pixels; less is a click. So a tool of your own that draws a box needs
+no threshold of its own: `canvasdrag` and `canvasclick` never both happen for one press. Zoomed in with `panOnEmpty`
+on, a drag on empty canvas moves the view instead; set `panOnEmpty: false` while such a tool is active (Space + drag
+still moves the view).
 
 ## Options
 

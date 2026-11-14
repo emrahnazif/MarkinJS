@@ -8,7 +8,7 @@
 const MarkinJS = (function () {
     'use strict';
 
-    const VERSION = '0.4.0';
+    const VERSION = '0.5.0';
     const SVG_NS = 'http://www.w3.org/2000/svg';
 
     const EVENTS = [
@@ -20,6 +20,8 @@ const MarkinJS = (function () {
         'dragend',
         'hover',
         'canvasclick',
+        'canvasdrag',
+        'canvasdragend',
         'viewchange',
         'viewsettle'
     ];
@@ -2977,6 +2979,16 @@ const MarkinJS = (function () {
 
         // dragstart, drag and dragend. The payload carries a copy of the annotation, so it is only
         // built when somebody listens.
+        // The box a drag across the empty canvas spans, [x, y, width, height] in image pixels, inside
+        // the image when constrainToImage is on.
+        _spanned(g) {
+            const B = this._bounds();
+            const clamp = (p) => [Math.min(Math.max(p.x, B.x1), B.x2), Math.min(Math.max(p.y, B.y1), B.y2)];
+            const [x1, y1] = clamp(this._toLocal(g.clientX, g.clientY));
+            const [x2, y2] = clamp(this._toLocal(g.endX, g.endY));
+            return [Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1)];
+        }
+
         _emitDrag(type, gesture, position, extra) {
             if (!this._has(type)) return;
             const ann = this.byId.get(gesture.key);
@@ -3019,7 +3031,16 @@ const MarkinJS = (function () {
                 g.lastY = event.clientY;
                 return;
             }
-            if (g.kind === 'canvas' || g.kind === 'press') return;
+            if (g.kind === 'canvas') {
+                // A drag across the empty canvas that does not move the view: the box it spans, for
+                // a host's tool (e.g. a box to find an object in).
+                g.endX = event.clientX;
+                g.endY = event.clientY;
+                g.live = true; // Escape cancels it
+                if (this._has('canvasdrag')) this._emit('canvasdrag', { box: this._spanned(g) });
+                return;
+            }
+            if (g.kind === 'press') return;
             event.preventDefault();
 
             const position = this._toLocal(event.clientX, event.clientY);
@@ -3068,6 +3089,8 @@ const MarkinJS = (function () {
                 if (!g.moved && !cancelled) {
                     if (this.enabled) this.deselect();
                     this._emit('canvasclick', { position: this._toLocal(g.clientX, g.clientY) });
+                } else if (g.moved && g.endX !== undefined) {
+                    this._emit('canvasdragend', { box: this._spanned(g), cancelled });
                 }
                 return;
             }
