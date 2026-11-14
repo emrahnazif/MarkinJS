@@ -301,7 +301,7 @@ MarkinJS.denormalize(annotations, width, height);  // fractions -&gt; pixels</co
                                         <tr><td><code>undo()</code> / <code>redo()</code></td><td>Return <code>true</code> if a step was taken.</td></tr>
                                         <tr><td><code>canUndo()</code> / <code>canRedo()</code></td><td>For enabling buttons.</td></tr>
                                         <tr><td><code>clearHistory()</code></td><td>Forget the steps, keep the data.</td></tr>
-                                        <tr><td><code>enable()</code> / <code>disable()</code> / <code>isEnabled()</code></td><td>A disabled editor edits nothing: pointer events pass through the annotations to whatever is underneath. Its view can still be zoomed and moved, and it still emits <code>hover</code> and <code>canvasclick</code>.</td></tr>
+                                        <tr><td><code>enable()</code> / <code>disable()</code> / <code>isEnabled()</code></td><td>A disabled editor edits nothing: pointer events pass through the annotations to whatever is underneath. Its view can still be zoomed and moved, and it still emits <code>hover</code>, <code>canvasclick</code> and <code>canvasdrag</code> / <code>canvasdragend</code>.</td></tr>
                                         <tr><td><code>setOptions(options)</code> / <code>getOptions()</code></td><td>Change options at run time.</td></tr>
                                         <tr><td><code>refresh()</code></td><td>Re-measure the canvas now. Only needed right after your own code scaled or moved it with a CSS transform; otherwise the editor re-measures by itself.</td></tr>
                                         <tr><td><code>getSVGElement()</code> / <code>getImageElement()</code> / <code>getContainerElement()</code></td><td>The SVG, the image under it (or <code>null</code>), and the viewport: the element that clips the zoomed picture (or <code>null</code>; an SVG that holds the whole picture clips itself).</td></tr>
@@ -347,6 +347,8 @@ MarkinJS.denormalize(annotations, width, height);  // fractions -&gt; pixels</co
                                         <tr><td><code>dragend</code></td><td>the same plus <code>changed</code>, <code>cancelled</code></td><td>A drag ended. A <code>change</code> follows if something changed.</td></tr>
                                         <tr><td><code>hover</code></td><td><code>{ position, id, part, index }</code></td><td>The pointer moved over the canvas (at most once per frame).</td></tr>
                                         <tr><td><code>canvasclick</code></td><td><code>{ position }</code></td><td>A click that hit no annotation and was not a drag of the view.</td></tr>
+                                        <tr><td><code>canvasdrag</code></td><td><code>{ box }</code></td><td>A drag across empty canvas that does not move the view: the box it spans so far, <code>[x, y, width, height]</code>.</td></tr>
+                                        <tr><td><code>canvasdragend</code></td><td><code>{ box, cancelled }</code></td><td>That drag ended (Escape cancels it).</td></tr>
                                         <tr><td><code>viewchange</code></td><td><code>{ x, y, width, height, scale }</code></td><td>The view moved or the canvas changed size (at most once per frame). Also once for the first view.</td></tr>
                                         <tr><td><code>viewsettle</code></td><td><code>{ x, y, width, height, scale }</code></td><td>The view has been still for <code>settleDelay</code> and shows another part of the image than when this last fired. Also for the first view, and for a new picture.</td></tr>
                                     </tbody>
@@ -366,7 +368,14 @@ MarkinJS.denormalize(annotations, width, height);  // fractions -&gt; pixels</co
                                 The <code>click</code> that the browser sends when a drag of the view is released is swallowed.
                             </p>
                             <p>
-                                A disabled editor still emits <code>hover</code> (with <code>id: null</code>) and <code>canvasclick</code> (for every click, wherever it lands).
+                                A disabled editor still emits <code>hover</code> (with <code>id: null</code>), <code>canvasclick</code> (for every click, wherever it lands)
+                                and <code>canvasdrag</code> / <code>canvasdragend</code> (for every drag that does not move the view).
+                            </p>
+                            <p>
+                                A press counts as a drag once it moves 3 screen pixels; less is a click. So a tool of your own that draws a box needs
+                                no threshold of its own: <code>canvasdrag</code> and <code>canvasclick</code> never both happen for one press. Zoomed in with
+                                <code>panOnEmpty</code> on, a drag on empty canvas moves the view instead; set <code>panOnEmpty: false</code> while such a tool
+                                is active (Space + drag still moves the view).
                             </p>
                         </section>
 
