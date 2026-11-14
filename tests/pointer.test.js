@@ -142,6 +142,45 @@ describe('selecting', () => {
         expect(ends).toEqual([{ box: [500, 400, 60, 40], cancelled: true }]);
     });
 
+    it('Escape cancels a box drag in a disabled editor too', () => {
+        const { editor, svg } = makeEditor({ annotations: [BOX] });
+        editor.disable();
+        const ends = [];
+        editor.on('canvasdragend', (e) => ends.push(e));
+        press(svg, 500, 400);
+        move(560, 440);
+        expect(key('Escape').defaultPrevented).toBe(true);
+        release(560, 440);
+        expect(ends).toEqual([{ box: [500, 400, 60, 40], cancelled: true }]);
+    });
+
+    it('with nobody listening for the box, Escape during a drag across the canvas still deselects', () => {
+        const { editor, svg } = makeEditor({ annotations: [BOX] });
+        editor.select('A');
+        press(svg, 500, 400);
+        move(560, 440);
+        expect(key('Escape').defaultPrevented).toBe(false);
+        expect(editor.getSelection()).toBe(null);
+        release(560, 440);
+    });
+
+    it('the box starts where the press was in the image, also when the view moves under the drag', () => {
+        const { editor, svg } = makeEditor({ annotations: [BOX], panOnEmpty: false });
+        const boxes = [];
+        editor.on('canvasdrag', (e) => boxes.push(e.box));
+        editor.on('canvasdragend', (e) => boxes.push(e.box));
+        press(svg, 500, 400);
+        move(560, 440);
+        editor.setView({ x: 400, y: 300, width: 400, height: 300 }); // twice as large: the pointer is now over 680, 520
+        move(560, 440);
+        release(560, 440);
+        expect(boxes).toEqual([
+            [500, 400, 60, 40],
+            [500, 400, 180, 120],
+            [500, 400, 180, 120]
+        ]);
+    });
+
     it('select() works from code and validates the part', () => {
         const { editor, svg, log } = makeEditor({ annotations: [POSE, { id: 'K', keypoints: [{ point: [5, 5] }] }] });
         expect(editor.select('P')).toBe(true);

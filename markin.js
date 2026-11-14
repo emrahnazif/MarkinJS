@@ -2773,6 +2773,8 @@ const MarkinJS = (function () {
                 button: event.button,
                 clientX: event.clientX,
                 clientY: event.clientY,
+                // The same point in the image: it stays that point when the view moves under the press.
+                origin: this._toLocal(event.clientX, event.clientY, m),
                 // Where the pointer was when the view last followed it.
                 lastX: event.clientX,
                 lastY: event.clientY,
@@ -2789,7 +2791,7 @@ const MarkinJS = (function () {
                 event.preventDefault();
                 event.stopPropagation();
                 this._takeFocus();
-                const target = this._pressTarget(hit, this._toLocal(event.clientX, event.clientY, m));
+                const target = this._pressTarget(hit, gesture.origin);
                 if (!target) return;
                 Object.assign(gesture, target);
                 this._capture(gesture, this.svg);
@@ -2984,8 +2986,8 @@ const MarkinJS = (function () {
         _spanned(g) {
             const B = this._bounds();
             const clamp = (p) => [Math.min(Math.max(p.x, B.x1), B.x2), Math.min(Math.max(p.y, B.y1), B.y2)];
-            const [x1, y1] = clamp(this._toLocal(g.clientX, g.clientY));
-            const [x2, y2] = clamp(this._toLocal(g.endX, g.endY));
+            const [x1, y1] = clamp(g.origin);
+            const [x2, y2] = clamp(g.end);
             return [Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1)];
         }
 
@@ -3034,9 +3036,9 @@ const MarkinJS = (function () {
             if (g.kind === 'canvas') {
                 // A drag across the empty canvas that does not move the view: the box it spans, for
                 // a host's tool (e.g. a box to find an object in).
-                g.endX = event.clientX;
-                g.endY = event.clientY;
-                g.live = true; // Escape cancels it
+                g.end = this._toLocal(event.clientX, event.clientY);
+                // Escape cancels it, when somebody is told of it. Otherwise Escape is not ours to take.
+                g.live = this._has('canvasdrag') || this._has('canvasdragend');
                 if (this._has('canvasdrag')) this._emit('canvasdrag', { box: this._spanned(g) });
                 return;
             }
@@ -3089,7 +3091,7 @@ const MarkinJS = (function () {
                 if (!g.moved && !cancelled) {
                     if (this.enabled) this.deselect();
                     this._emit('canvasclick', { position: this._toLocal(g.clientX, g.clientY) });
-                } else if (g.moved && g.endX !== undefined) {
+                } else if (g.moved && g.end) {
                     this._emit('canvasdragend', { box: this._spanned(g), cancelled });
                 }
                 return;
@@ -3139,6 +3141,12 @@ const MarkinJS = (function () {
             if (keyboardOwner() !== this) return;
             if (this._viewKey(event)) {
                 event.preventDefault();
+                return;
+            }
+            // A disabled editor reports a drag across the empty canvas too, so Escape cancels it there as well.
+            if (event.key === 'Escape' && this.gesture && this.gesture.kind === 'canvas' && this.gesture.live) {
+                event.preventDefault();
+                this._finishGesture(true);
                 return;
             }
             // The keys above move the view. The ones below edit, which a disabled editor does not.
